@@ -193,6 +193,18 @@ def publish(zip_path: Path, *, category: str, changelog: str) -> None:
     print(json.dumps(result, indent=2))
     if result.get("ok") is False or result.get("error"):
         raise SystemExit(result.get("error") or "release failed")
+    # uds_release may leave the item in draft — force catalog publish.
+    print(f"publishing catalog item {pid!r}…")
+    published = mcp_call(
+        base,
+        key,
+        "uds_publish",
+        {"slug": pid, "categories": ["plugins"]},
+    )
+    print(json.dumps(published, indent=2))
+    item = published.get("item") if isinstance(published.get("item"), dict) else {}
+    if item.get("status") and item.get("status") != "published":
+        raise SystemExit(f"uds_publish left status={item.get('status')!r}")
 
 
 def main() -> None:

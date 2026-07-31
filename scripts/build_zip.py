@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT_DIR = ROOT / "deploy"
 SKIP_NAMES = {
     ".git",
+    ".pytest_cache",
     "scripts",
     "deploy",
     ".gitignore",
@@ -42,7 +43,7 @@ def build_zip(*, out: Path | None = None) -> Path:
             if not path.is_file():
                 continue
             rel_parts = path.relative_to(ROOT).parts
-            if not rel_parts or rel_parts[0] in SKIP_NAMES:
+            if not rel_parts or any(part in SKIP_NAMES for part in rel_parts):
                 continue
             if path.name in SKIP_NAMES:
                 continue
