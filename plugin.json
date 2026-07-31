@@ -1,10 +1,10 @@
 {
   "id": "uasset-preview",
   "kind": "plugin",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "label": "UAsset Preview",
-  "description": "Preview .uasset / .umap assets (thumbnails, materials, textures, StaticMesh 3D) and standalone 3D model files (.fbx, .glb, …) in the panel. Without this plugin those files open as binary.",
-  "min_app_version": "1.0.651",
+  "description": "Preview .uasset / .umap assets (thumbnails, materials, textures, StaticMesh 3D) and standalone 3D model files (.fbx, .glb, …) in the panel. Install from Settings → Store; without this plugin those files open as binary with a Store link.",
+  "min_app_version": "1.0.655",
   "default_enabled": true,
   "secret_keys": [],
   "contributes": {

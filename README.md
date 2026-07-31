@@ -3,7 +3,8 @@
 Preview `.uasset` / `.umap` assets (thumbnails, materials, textures, StaticMesh 3D)
 and standalone 3D model files (`.fbx`, `.glb`, …) inside the UEFN-Ducky panel.
 
-Without this plugin installed, those files open as binary (View raw hex).
+Without this plugin installed, those files open as binary with an **Open Store**
+link (plus View raw hex).
 
 ## Develop
 
