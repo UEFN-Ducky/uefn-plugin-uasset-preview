@@ -1,0 +1,49 @@
+{
+  "id": "uasset-preview",
+  "kind": "plugin",
+  "version": "1.0.0",
+  "label": "UAsset Preview",
+  "description": "Preview .uasset / .umap assets (thumbnails, materials, textures, StaticMesh 3D) and standalone 3D model files (.fbx, .glb, …) in the panel. Without this plugin those files open as binary.",
+  "min_app_version": "1.0.651",
+  "default_enabled": true,
+  "secret_keys": [],
+  "contributes": {
+    "ui.panels": [
+      {
+        "id": "asset",
+        "title": "UAsset Preview",
+        "icon": "assets/icon.png",
+        "entry": "ui/asset.html"
+      },
+      {
+        "id": "model",
+        "title": "3D Model Preview",
+        "icon": "assets/icon.png",
+        "entry": "ui/model.html"
+      }
+    ],
+    "editor.kinds": [
+      {
+        "kind": "unreal_asset",
+        "title": "UAsset Preview",
+        "ui": "panel:asset",
+        "suffixes": [".uasset", ".umap", ".ubulk", ".uexp", ".uptod", ".udic", ".ufont", ".ushaderbytecode", ".upipelinecache"]
+      },
+      {
+        "kind": "model",
+        "title": "3D Model Preview",
+        "ui": "panel:model",
+        "suffixes": [".fbx", ".glb", ".gltf", ".obj", ".stl", ".ply", ".dae"]
+      }
+    ],
+    "agent.tools": {
+      "category": "uasset",
+      "intent_pattern": "\\b(uasset|umap|static\\s*mesh|material\\s*preview|texture\\s*preview|mesh\\s*preview)\\b",
+      "plan_tools": ["uasset_preview_info"]
+    }
+  },
+  "backend": {
+    "entry": "backend",
+    "register": "register"
+  }
+}

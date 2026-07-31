@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>3D Model Preview</title>
+  <style>
+    :root { --bg: #1a1a1e; --surface: #242429; --text: #e8e8ec; --muted: #9a9aa3; --border: #33333a; --err: #f07178; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+      font: 13px/1.45 system-ui, Segoe UI, sans-serif; }
+    .pane { display: flex; flex-direction: column; height: 100%; }
+    .hdr { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+      border-bottom: 1px solid var(--border); background: var(--surface); }
+    .hdr h1 { margin: 0; flex: 1; font-size: 13px; font-weight: 600; word-break: break-all; }
+    button { background: var(--bg); color: var(--text); border: 1px solid var(--border);
+      border-radius: 6px; padding: 4px 10px; cursor: pointer; font: inherit; }
+    button.active { border-color: #6c8cff; color: #6c8cff; }
+    #viewer { flex: 1; min-height: 0; }
+    .err, .status { padding: 10px 12px; }
+    .err { color: var(--err); }
+    .status { color: var(--muted); }
+  </style>
+</head>
+<body>
+<div class="pane">
+  <div class="hdr">
+    <h1 id="title">…</h1>
+    <button type="button" id="btn-grid" class="active">Grid</button>
+    <button type="button" id="btn-spin">Spin</button>
+  </div>
+  <div id="status" class="status">Loading model…</div>
+  <div id="err" class="err" hidden></div>
+  <div id="viewer"></div>
+</div>
+<script src="viewer.bundle.js"></script>
+<script>
+(function () {
+  var CHANNEL = "uefn-plugin-ui";
+  function call(method, params) {
+    var id = crypto.randomUUID();
+    return new Promise(function (resolve, reject) {
+      var timer = window.setTimeout(function () {
+        window.removeEventListener("message", onMsg);
+        reject(new Error("Timed out talking to host"));
+      }, 30000);
+      function onMsg(ev) {
+        var d = ev.data;
+        if (!d || d.channel !== CHANNEL || d.id !== id) return;
+        window.clearTimeout(timer);
+        window.removeEventListener("message", onMsg);
+        if (d.ok) resolve(d.result);
+        else reject(new Error(d.error || "bridge error"));
+      }
+      window.addEventListener("message", onMsg);
+      parent.postMessage({ channel: CHANNEL, id: id, method: method, params: params || {} }, "*");
+    });
+  }
+  function rpc(method, params) { return call("plugin.call", { method: method, params: params || {} }); }
+  function basename(p) {
+    var s = String(p || "").replace(/\\/g, "/");
+    var i = s.lastIndexOf("/");
+    return i >= 0 ? s.slice(i + 1) : s;
+  }
+
+  var viewer = null;
+  var gridOn = true;
+  var spinOn = false;
+
+  async function boot() {
+    if (!window.UassetViewer) throw new Error("viewer.bundle.js missing — run npm run build:ui");
+    var info = await call("plugin.info", {});
+    var filePath = (info && info.filePath) || "";
+    if (!filePath) {
+      try { filePath = new URLSearchParams(location.search).get("file") || ""; } catch (e) {}
+    }
+    if (!filePath) throw new Error("No file path");
+    document.getElementById("title").textContent = basename(filePath);
+    var media = await rpc("model_media_url", { relative_path: filePath });
+    if (!media || !media.media_url) throw new Error("Could not resolve model media URL");
+    viewer = window.UassetViewer.createViewer(document.getElementById("viewer"), { maxPixelRatio: 2 });
+    await viewer.setMedia(media);
+    document.getElementById("status").hidden = true;
+  }
+
+  document.getElementById("btn-grid").onclick = function () {
+    gridOn = !gridOn;
+    this.classList.toggle("active", gridOn);
+    if (viewer) viewer.setGrid(gridOn);
+  };
+  document.getElementById("btn-spin").onclick = function () {
+    spinOn = !spinOn;
+    this.classList.toggle("active", spinOn);
+    if (viewer) viewer.setAutoRotate(spinOn);
+  };
+
+  boot().catch(function (e) {
+    document.getElementById("status").hidden = true;
+    var err = document.getElementById("err");
+    err.hidden = false;
+    err.textContent = e.message || String(e);
+  });
+})();
+</script>
+</body>
+</html>
