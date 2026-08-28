@@ -19,3 +19,7 @@ Install/update only via **Settings → Store**.
 
 Requires host app ≥ `min_app_version` in `plugin.json` (plugin-owned editor kinds +
 plugin listener handler overlay).
+
+## License
+
+MIT. Copyright (c) 2026 Mindful Path Company, LLC. See [LICENSE](LICENSE).
