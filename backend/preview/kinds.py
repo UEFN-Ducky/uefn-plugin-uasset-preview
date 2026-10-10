@@ -28,12 +28,15 @@ _TEXTURE_CLASSES = frozenset(
 )
 
 
+_WIDGET_CLASSES = frozenset({"widgetblueprint", "editorutilitywidgetblueprint"})
+
+
 def normalize_asset_class(asset_class: str) -> str:
     return (asset_class or "").strip()
 
 
 def guess_preview_kind(relative_path: str, asset_class: str = "") -> str:
-    """Return static_mesh | material | texture | niagara | other."""
+    """Return static_mesh | material | texture | niagara | widget | other."""
     cls = normalize_asset_class(asset_class).lower()
     # Redirectors are stubs for moved assets — ignore class and use path heuristics.
     if cls == "objectredirector":
@@ -46,8 +49,10 @@ def guess_preview_kind(relative_path: str, asset_class: str = "") -> str:
         return "texture"
     if "niagara" in cls or cls in {"particlesystem", "particle_system"}:
         return "niagara"
+    if cls in _WIDGET_CLASSES:
+        return "widget"
 
-    path = (relative_path or "").strip().replace("\\", "/").lower()
+    path =(relative_path or "").strip().replace("\\", "/").lower()
     stem = Path(path).stem.lower()
     if "/materials/" in path or stem.startswith(("m_", "mi_")):
         return "material"
@@ -57,6 +62,8 @@ def guess_preview_kind(relative_path: str, asset_class: str = "") -> str:
         return "niagara"
     if stem.startswith("sm_"):
         return "static_mesh"
+    if stem.startswith(("wbp_", "wb_")):
+        return "widget"
     return "other"
 
 

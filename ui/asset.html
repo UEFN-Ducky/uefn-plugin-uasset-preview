@@ -31,6 +31,7 @@
     .status { color: var(--muted); padding: 12px; }
     details { border-top: 1px solid var(--border); background: var(--surface); }
     details summary { padding: 8px 12px; cursor: pointer; color: var(--muted); }
+    #tree { max-height: 40vh; }
     pre { margin: 0; padding: 8px 12px; max-height: 180px; overflow: auto; font: 11px/1.35 ui-monospace, Consolas, monospace; white-space: pre-wrap; }
   </style>
 </head>
@@ -54,6 +55,10 @@
     <div class="img-wrap" id="img-wrap" hidden><img id="thumb" alt="preview" /></div>
     <div id="viewer" hidden></div>
   </div>
+  <details id="tree-details" open hidden>
+    <summary>Widget tree</summary>
+    <pre id="tree"></pre>
+  </details>
   <details id="hex-details" hidden>
     <summary>View raw (hex)</summary>
     <pre id="hex"></pre>
@@ -158,6 +163,24 @@
     await viewer.setMedia(media);
   }
 
+  async function loadWidgetTree() {
+    var pre = document.getElementById("tree");
+    document.getElementById("tree-details").hidden = false;
+    pre.textContent = "Reading widget tree from UEFN…";
+    try {
+      var res = await rpc("load_widget_tree", { relative_path: filePath });
+      if (!res || res.ok === false) throw new Error((res && res.error) || "Could not read widget tree");
+      var lines = [];
+      if (res.variables && res.variables.length) lines.push("Variables: " + res.variables.join(", "), "");
+      (res.widgets || []).forEach(function (w) {
+        lines.push(new Array(w.depth + 1).join("  ") + w.name + "  (" + w.class + ")" + (w.is_variable ? "  [variable]" : ""));
+      });
+      pre.textContent = lines.join("\n") || "Empty widget tree.";
+    } catch (e) {
+      pre.textContent = e.message || String(e);
+    }
+  }
+
   async function loadHex() {
     try {
       var hex = await rpc("read_hex", { relative_path: filePath });
@@ -178,6 +201,7 @@
     } else {
       document.getElementById("status").textContent = "No thumbnail yet. Use the buttons above when UEFN is online.";
     }
+    if (result && result.supports_widget_tree && result.listener_online) loadWidgetTree();
     if (!result || result.listener_online === false || result.fallback) await loadHex();
 
     // Auto-load mesh / material / texture when kind is clear.

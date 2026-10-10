@@ -306,3 +306,60 @@ def cmd_preview_asset(asset_path: str, max_size: int = 256) -> dict:
     if verse_class_stem:
         result["verse_class_stem"] = verse_class_stem
     return result
+
+
+# Epic's EditorAppToolset.CaptureAssetImage renders the Content Browser thumbnail
+# in its own preview scene — the level is never touched. It completes a few frames
+# later, and waiting here would block the tick that finishes it, so callers start
+# a capture, then poll for it on later requests.
+_CAPTURE_TOOLSET = "EditorToolset.EditorAppToolset"
+_CAPTURE_TTL_SECONDS = 60.0
+_asset_captures: dict[str, tuple[Any, float]] = {}
+
+
+@register("capture_asset_image_start")
+def cmd_capture_asset_image_start(asset_path: str) -> dict:
+    """Start a live thumbnail render of ``asset_path``; returns a token to poll."""
+    import json
+    import time
+    import uuid
+
+    registry = getattr(unreal, "ToolsetRegistry", None)
+    if registry is None or not registry.is_available():
+        raise RuntimeError("Asset capture unavailable: Epic's ToolsetRegistry is not loaded")
+    now = time.time()
+    for token, (_, started) in list(_asset_captures.items()):
+        if now - started > _CAPTURE_TTL_SECONDS:
+            _asset_captures.pop(token, None)
+    result = registry.execute_tool(
+        _CAPTURE_TOOLSET, "CaptureAssetImage", json.dumps({"assetPath": asset_path})
+    )
+    token = uuid.uuid4().hex
+    _asset_captures[token] = (result, now)
+    return {"token": token}
+
+
+@register("capture_asset_image_poll")
+def cmd_capture_asset_image_poll(token: str) -> dict:
+    """``{"done": False}`` while rendering, then the PNG written under DuckyPreviews."""
+    import base64
+    import json
+
+    entry = _asset_captures.get(token)
+    if entry is None:
+        raise ValueError("Unknown or expired capture token")
+    result = entry[0]
+    if not result.is_complete:
+        return {"done": False}
+    _asset_captures.pop(token, None)
+    error = str(getattr(result, "error", "") or "")
+    if error:
+        raise RuntimeError(f"Asset capture failed: {error}")
+    payload = json.loads(str(result.value or "{}"))
+    data = str((payload.get("returnValue") or {}).get("data") or "")
+    if not data:
+        raise RuntimeError("Asset capture returned an empty image")
+    out_path = os.path.join(_preview_dir(), f"capture_{token}.png")
+    with open(out_path, "wb") as fh:
+        fh.write(base64.b64decode(data))
+    return {"done": True, "preview_file": out_path}

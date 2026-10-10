@@ -53,3 +53,10 @@ def test_clean_listener_error():
         "Traceback (most recent call last):\n  File ..."
     )
     assert clean_listener_error(raw) == "Not a StaticMesh (got Material)."
+
+
+def test_widget_blueprint_kind():
+    assert guess_preview_kind("Content/AdminPanel/BlueButton.uasset", "WidgetBlueprint") == "widget"
+    assert guess_preview_kind("x.uasset", "EditorUtilityWidgetBlueprint") == "widget"
+    assert guess_preview_kind("Content/AdminPanel/WBP_TimerUI.uasset") == "widget"
+    assert guess_preview_kind("Content/UI/WB_Hud.uasset") == "widget"
