@@ -8,6 +8,17 @@ from . import cache as preview_cache
 from . import service as preview_service
 
 
+def _fake_bridge(monkeypatch, post):
+    """Stand in for the app's backend.bridge. Run from the plugin folder, the plugin's own
+    ``backend`` package hides the app's, so patching ``backend.bridge.*`` by name fails."""
+    import sys
+    import types
+
+    bridge = types.ModuleType("backend.bridge")
+    bridge.post_command_to_listener = post
+    monkeypatch.setitem(sys.modules, "backend.bridge", bridge)
+
+
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path, monkeypatch):
     root = tmp_path / "UEFN-Ducky"
@@ -87,7 +98,7 @@ def test_load_texture_preview_cache_hit_skips_listener(monkeypatch):
         "stat_project_file",
         lambda path: {"exists": True, "mtime_ns": 5, "size": 20, "path": path},
     )
-    monkeypatch.setattr("backend.bridge.post_command_to_listener", boom)
+    _fake_bridge(monkeypatch, boom)
 
     out = preview_service.load_texture_preview(rel)
     assert out["ok"] is True

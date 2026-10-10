@@ -10,6 +10,17 @@ from . import mesh_cache
 from . import service as preview_service
 
 
+def _fake_bridge(monkeypatch, post):
+    """Stand in for the app's backend.bridge. Run from the plugin folder, the plugin's own
+    ``backend`` package hides the app's, so patching ``backend.bridge.*`` by name fails."""
+    import sys
+    import types
+
+    bridge = types.ModuleType("backend.bridge")
+    bridge.post_command_to_listener = post
+    monkeypatch.setitem(sys.modules, "backend.bridge", bridge)
+
+
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path, monkeypatch):
     root = tmp_path / "UEFN-Ducky"
@@ -68,7 +79,7 @@ def test_load_static_mesh_preview_offline_stale_latest(monkeypatch, tmp_path):
     assert out["stale"] is True
     assert out["from_cache"] is True
     assert out["listener_online"] is False
-    assert "/mesh-previews/" in out["media_url"]
+    assert "/cache/mesh/" in out["media_url"]
 
 
 def test_load_static_mesh_preview_cache_hit_skips_listener(monkeypatch, tmp_path):
@@ -99,13 +110,13 @@ def test_load_static_mesh_preview_cache_hit_skips_listener(monkeypatch, tmp_path
         "stat_project_file",
         lambda rel: {"exists": True, "mtime_ns": 42, "size": 6, "path": rel},
     )
-    monkeypatch.setattr("backend.bridge.post_command_to_listener", boom)
+    _fake_bridge(monkeypatch, boom)
 
     out = preview_service.load_static_mesh_preview("Content/Meshes/SM_Box.uasset")
     assert out["ok"] is True
     assert out["from_cache"] is True
     assert called["n"] == 0
-    assert "/mesh-previews/" in out["media_url"]
+    assert "/cache/mesh/" in out["media_url"]
 
 
 def test_load_static_mesh_preview_exports_once(monkeypatch, tmp_path):
@@ -132,7 +143,7 @@ def test_load_static_mesh_preview_exports_once(monkeypatch, tmp_path):
             "metadata": {"lod_count": 3, "has_nanite": False, "material_slots": 1},
         }
 
-    monkeypatch.setattr("backend.bridge.post_command_to_listener", fake_post)
+    _fake_bridge(monkeypatch, fake_post)
 
     first = preview_service.load_static_mesh_preview("Content/Meshes/SM_Box.uasset")
     assert first["ok"] is True
