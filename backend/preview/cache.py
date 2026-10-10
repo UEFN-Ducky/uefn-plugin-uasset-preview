@@ -68,7 +68,13 @@ def meta_path_for_id(preview_id: str, *, project_slug: str | None = None) -> Pat
 
 
 def preview_url(preview_id: str) -> str:
-    return png_cache_url(preview_id)
+    # The id is per file version, not per image: a badge and the real export share
+    # it. Version the URL by write time so the webview never shows a stale image.
+    try:
+        version = preview_path_for_id(preview_id).stat().st_mtime_ns
+    except (OSError, ValueError):
+        return png_cache_url(preview_id)
+    return f"{png_cache_url(preview_id)}?v={version}"
 
 
 def _record_from_id(preview_id: str, relative_path: str, *, project_slug: str | None = None) -> Optional[PreviewRecord]:

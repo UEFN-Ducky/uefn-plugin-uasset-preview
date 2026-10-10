@@ -17,6 +17,8 @@ from .kinds import (
     supports_texture_preview,
 )
 from .paths import disk_path_to_asset_path, is_previewable_binary
+from .thumbnail import extract_embedded_thumbnail
+from .widget_tree import summarize_widget_tree
 from .verse_link import find_verse_source, stem_from_relative_path
 from frontend.settings import PANEL_LISTENER_PORT
 from frontend.ui_web import project_files as pf
@@ -70,6 +72,7 @@ def _annotate_preview(result: dict[str, Any], relative_path: str) -> dict[str, A
     result["supports_mesh_preview"] = kind == "static_mesh"
     result["supports_material_preview"] = kind == "material"
     result["supports_texture_preview"] = kind == "texture"
+    result["supports_widget_tree"] = kind == "widget"
     return result
 
 
@@ -135,6 +138,24 @@ def preview_project_asset(relative_path: str) -> dict[str, Any]:
     mtime_ns = int(stat.get("mtime_ns") or 0)
     size = int(stat.get("size") or 0)
 
+    out = _preview_project_asset(rel, mtime_ns, size)
+    if out.get("preview_kind") == "widget" and (out.get("mode") != "image" or out.get("stale")):
+        # Widget Blueprints have no UEFN export; their saved designer thumbnail is the preview.
+        thumb = _embedded_thumbnail_preview(
+            rel,
+            mtime_ns,
+            size,
+            mode="image",
+            asset_class=str(out.get("asset_class") or ""),
+            asset_path=str(out.get("asset_path") or ""),
+        )
+        if thumb is not None:
+            thumb["listener_online"] = bool(out.get("listener_online"))
+            return thumb
+    return out
+
+
+def _preview_project_asset(rel: str, mtime_ns: int, size: int) -> dict[str, Any]:
     cached = get_cached(rel, mtime_ns, size)
     online = _listener_online()
     if cached is not None:
@@ -189,14 +210,8 @@ def load_static_mesh_preview(relative_path: str) -> dict[str, Any]:
     if not rel.lower().endswith(".uasset"):
         return {"ok": False, "error": "Only .uasset static meshes can be 3D-previewed."}
 
-    if not supports_mesh_preview(rel):
-        # Path heuristic reject before hitting UEFN (Materials/, Niagara/, etc.).
-        kind = guess_preview_kind(rel)
-        return {
-            "ok": False,
-            "error": f"This looks like a {kind.replace('_', ' ')} asset, not a StaticMesh.",
-            "preview_kind": kind,
-        }
+    # No path-only reject: meshes without an SM_ prefix are common. UEFN's
+    # registry class (checked below, before any export) is the authority.
 
     stat = pf.stat_project_file(rel)
     if not stat.get("exists"):
@@ -304,24 +319,157 @@ def load_texture_preview(relative_path: str) -> dict[str, Any]:
     return _load_uefn_image_preview(relative_path, expected="texture")
 
 
+def _embedded_thumbnail_preview(
+    rel: str,
+    mtime_ns: int,
+    size: int,
+    *,
+    mode: str,
+    asset_class: str = "",
+    asset_path: str = "",
+) -> dict[str, Any] | None:
+    """Serve the Content Browser thumbnail stored in the .uasset (no UEFN needed)."""
+    try:
+        image = extract_embedded_thumbnail(pf.resolve_project_file_path(rel))
+    except Exception:
+        return None
+    if not image:
+        return None
+    return _store_thumbnail_preview(
+        rel,
+        mtime_ns,
+        size,
+        image,
+        mode=mode,
+        asset_class=asset_class,
+        asset_path=asset_path,
+        source="embedded_thumbnail",
+    )
+
+
+#: Delay between polls of a live UEFN thumbnail render (it lands in ~0.3 s).
+_CAPTURE_POLL_SECONDS = 0.1
+_CAPTURE_TIMEOUT_SECONDS = 10.0
+
+
+def _live_capture_preview(
+    rel: str, mtime_ns: int, size: int, *, mode: str, asset_class: str = ""
+) -> dict[str, Any] | None:
+    """Render the asset's thumbnail live in UEFN (current state, level untouched)."""
+    import time
+
+    asset_path = disk_path_to_asset_path(rel, _content_root())
+    try:
+        from backend.bridge import post_command_to_listener
+
+        start = post_command_to_listener(
+            PANEL_LISTENER_PORT, "capture_asset_image_start", {"asset_path": asset_path}, timeout=10.0
+        )
+        token = str((start or {}).get("token") or "")
+        deadline = time.monotonic() + _CAPTURE_TIMEOUT_SECONDS
+        while token and time.monotonic() < deadline:
+            res = post_command_to_listener(
+                PANEL_LISTENER_PORT, "capture_asset_image_poll", {"token": token}, timeout=5.0
+            )
+            if res.get("done"):
+                image = Path(str(res.get("preview_file") or "")).read_bytes()
+                return _store_thumbnail_preview(
+                    rel,
+                    mtime_ns,
+                    size,
+                    image,
+                    mode=mode,
+                    asset_class=asset_class,
+                    asset_path=asset_path,
+                    source="live_capture",
+                )
+            time.sleep(_CAPTURE_POLL_SECONDS)
+    except Exception:
+        return None
+    return None
+
+
+def _store_thumbnail_preview(
+    rel: str,
+    mtime_ns: int,
+    size: int,
+    image: bytes,
+    *,
+    mode: str,
+    asset_class: str,
+    asset_path: str,
+    source: str,
+) -> dict[str, Any]:
+    try:
+        from PIL import Image
+        import io
+
+        with Image.open(io.BytesIO(image)) as img:
+            buf = io.BytesIO()
+            img.convert("RGBA").save(buf, format="PNG")
+            image = buf.getvalue()
+    except Exception:
+        pass  # browsers sniff JPEG bytes even when served as .png
+
+    previous = get_cached(rel, mtime_ns, size) or get_latest_cached(rel)
+    if previous is not None:
+        asset_class = previous.asset_class or asset_class
+        asset_path = previous.asset_path or asset_path
+    preview_id = put_cached(
+        rel,
+        mtime_ns,
+        size,
+        image,
+        mode=mode,
+        asset_class=asset_class,
+        asset_path=asset_path,
+        metadata={"source": source},
+    )
+    from .cache import preview_url
+
+    # The panel merges this into the asset it already shows: omit what we do not
+    # know (asset_path, listener state) rather than blank it out.
+    out: dict[str, Any] = {
+        "ok": True,
+        "mode": mode,
+        "asset_class": asset_class,
+        "preview_url": preview_url(preview_id),
+        "preview_id": preview_id,
+        "metadata": {"source": source},
+        f"from_{source}": True,
+    }
+    if asset_path:
+        out["asset_path"] = asset_path
+    return _annotate_preview(out, rel)
+
+
 def _load_uefn_image_preview(relative_path: str, *, expected: str) -> dict[str, Any]:
     """Shared material/texture thumbnail path via listener ``preview_asset``."""
     rel = (relative_path or "").strip().replace("\\", "/")
     supports = supports_material_preview if expected == "material" else supports_texture_preview
     label = "Material" if expected == "material" else "Texture"
-    if not supports(rel):
-        kind = guess_preview_kind(rel)
-        return {
-            "ok": False,
-            "error": f"{label} preview is for {expected}s only (this looks like {kind.replace('_', ' ')}).",
-            "preview_kind": kind,
-        }
+    # No path-only reject: names like Lobby/chut carry no T_/M_ hint. UEFN's
+    # registry class (checked below, before any export) is the authority.
 
     stat = pf.stat_project_file(rel)
     if not stat.get("exists"):
         return {"ok": False, "error": f"Not a file: {relative_path}"}
     mtime_ns = int(stat.get("mtime_ns") or 0)
     size = int(stat.get("size") or 0)
+
+    if expected == "material":
+        # A lit thumbnail beats a flat render-target draw, which only captures
+        # emissive (surface materials come out blank). Live render first (current
+        # state), else the one UEFN saved in the package.
+        if _listener_online():
+            live = _live_capture_preview(rel, mtime_ns, size, mode=expected, asset_class=label)
+            if live is not None:
+                return live
+        embedded = _embedded_thumbnail_preview(
+            rel, mtime_ns, size, mode=expected, asset_class=label
+        )
+        if embedded is not None:
+            return embedded
 
     # Exact-key hit: skip re-export (online or offline).
     cached = get_cached(rel, mtime_ns, size)
@@ -427,3 +575,25 @@ def _load_uefn_image_preview(relative_path: str, *, expected: str) -> dict[str, 
         },
         rel,
     )
+
+
+def load_widget_tree(relative_path: str) -> dict[str, Any]:
+    """Widget Blueprint hierarchy + variables from UEFN (read-only)."""
+    rel = (relative_path or "").strip().replace("\\", "/")
+    if not _listener_online():
+        return {"ok": False, "error": "UEFN is offline — start UEFN to read the widget tree."}
+    asset_path = disk_path_to_asset_path(rel, _content_root())
+    try:
+        from backend.bridge import post_command_to_listener
+
+        info = post_command_to_listener(
+            PANEL_LISTENER_PORT,
+            "get_widget_blueprint_info",
+            {"widget_path": asset_path},
+            timeout=20.0,
+        )
+    except Exception as exc:
+        return {"ok": False, "error": clean_listener_error(str(exc)), "asset_path": asset_path}
+    if not isinstance(info, dict):
+        return {"ok": False, "error": "Unexpected listener response for widget tree"}
+    return {"ok": True, "asset_path": asset_path, **summarize_widget_tree(info)}

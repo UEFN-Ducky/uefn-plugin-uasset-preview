@@ -4,6 +4,7 @@ from .service import (
     load_material_preview,
     load_static_mesh_preview,
     load_texture_preview,
+    load_widget_tree,
     open_asset_in_uefn,
     preview_project_asset,
 )
@@ -14,4 +15,5 @@ __all__ = [
     "load_static_mesh_preview",
     "load_material_preview",
     "load_texture_preview",
+    "load_widget_tree",
 ]

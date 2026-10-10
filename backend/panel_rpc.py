@@ -29,6 +29,12 @@ def load_texture_preview(relative_path: str = "", **_kwargs: Any) -> dict[str, A
     return _load(str(relative_path or ""))
 
 
+def load_widget_tree(relative_path: str = "", **_kwargs: Any) -> dict[str, Any]:
+    from .preview import load_widget_tree as _load
+
+    return _load(str(relative_path or ""))
+
+
 def open_asset_in_uefn(relative_path: str = "", **_kwargs: Any) -> dict[str, Any]:
     from .preview import open_asset_in_uefn as _open
 
@@ -79,6 +85,7 @@ def register_panel_rpcs(api: Any) -> None:
     api.register_panel_rpc("load_static_mesh_preview", load_static_mesh_preview)
     api.register_panel_rpc("load_material_preview", load_material_preview)
     api.register_panel_rpc("load_texture_preview", load_texture_preview)
+    api.register_panel_rpc("load_widget_tree", load_widget_tree)
     api.register_panel_rpc("open_asset_in_uefn", open_asset_in_uefn)
     api.register_panel_rpc("read_hex", read_hex)
     api.register_panel_rpc("model_media_url", model_media_url)

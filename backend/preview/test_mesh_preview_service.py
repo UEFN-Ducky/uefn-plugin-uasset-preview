@@ -143,3 +143,33 @@ def test_load_static_mesh_preview_exports_once(monkeypatch, tmp_path):
     second = preview_service.load_static_mesh_preview("Content/Meshes/SM_Box.uasset")
     assert second["ok"] is True
     assert second["from_cache"] is True
+
+
+def test_load_static_mesh_preview_trusts_class_over_unhinted_path(monkeypatch):
+    # No SM_ prefix, no Meshes/ folder: only UEFN's class says it is a StaticMesh.
+    import sys
+    import types
+
+    def fake_post(port, command, params, timeout=8.0):
+        if command == "get_asset_info":
+            return {"asset": {"asset_class": "StaticMesh"}}
+        assert command == "preview_static_mesh"
+        out_dir = Path(params["output_directory"])
+        out_dir.mkdir(parents=True, exist_ok=True)
+        fbx = out_dir / "model.fbx"
+        fbx.write_bytes(b"exported")
+        return {"exported_file": str(fbx), "output_directory": str(out_dir), "filename": "model.fbx"}
+
+    bridge = types.ModuleType("backend.bridge")
+    bridge.post_command_to_listener = fake_post
+    monkeypatch.setitem(sys.modules, "backend.bridge", bridge)
+    monkeypatch.setattr(preview_service, "_listener_online", lambda: True)
+    monkeypatch.setattr(preview_service, "_content_root", lambda: "/Game/")
+    monkeypatch.setattr(
+        preview_service.pf,
+        "stat_project_file",
+        lambda rel: {"exists": True, "mtime_ns": 4, "size": 9, "path": rel},
+    )
+
+    out = preview_service.load_static_mesh_preview("Content/Lobby/rocher.uasset")
+    assert out["ok"] is True, out
