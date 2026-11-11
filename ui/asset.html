@@ -43,6 +43,7 @@
     <div class="actions">
       <button type="button" id="btn-open">Open in UEFN</button>
       <button type="button" id="btn-copy">Copy asset path</button>
+      <button type="button" id="btn-umg" hidden>Interactive preview</button>
       <button type="button" id="btn-mesh" hidden>Load 3D preview</button>
       <button type="button" id="btn-mat" hidden>Load material preview</button>
       <button type="button" id="btn-tex" hidden>Load texture preview</button>
@@ -196,6 +197,13 @@
     document.getElementById("title").textContent = basename(filePath);
     result = await rpc("preview_asset", { relative_path: filePath });
     renderMeta(result || {});
+    // Widget Blueprints open in the interactive player; "Asset details" there comes back here.
+    var wantsDetails = false;
+    try { wantsDetails = new URLSearchParams(location.search).get("details") === "1"; } catch (e) {}
+    if (result && result.preview_kind === "widget") {
+      if (!wantsDetails) { location.replace("umg.html?file=" + encodeURIComponent(filePath)); return; }
+      document.getElementById("btn-umg").hidden = false;
+    }
     if (result && result.preview_url && (result.mode === "texture" || result.mode === "material" || result.mode === "image" || result.mode === "badge" || result.mode === "asset" || result.mode === "verse")) {
       showImage(result.preview_url);
     } else {
@@ -219,6 +227,9 @@
     rpc("open_asset_in_uefn", { relative_path: filePath }).then(function (res) {
       if (res && res.ok === false) showErr(res.error || "Could not open in UEFN");
     }).catch(function (e) { showErr(e.message); });
+  };
+  document.getElementById("btn-umg").onclick = function () {
+    location.href = "umg.html?file=" + encodeURIComponent(filePath);
   };
   document.getElementById("btn-copy").onclick = function () {
     var p = (result && result.asset_path) || "";

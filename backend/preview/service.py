@@ -64,8 +64,20 @@ def _fetch_asset_class(asset_path: str) -> str:
     return ""
 
 
+def _class_from_file(relative_path: str) -> str:
+    """Asset class read from the .uasset itself — works with UEFN closed."""
+    if not relative_path.lower().endswith(".uasset"):
+        return ""
+    from .uasset import main_asset_class
+
+    try:
+        return main_asset_class(pf.resolve_project_file_path(relative_path))
+    except Exception:  # noqa: BLE001 - an unresolvable path just leaves the class unknown
+        return ""
+
+
 def _annotate_preview(result: dict[str, Any], relative_path: str) -> dict[str, Any]:
-    asset_class = str(result.get("asset_class") or "")
+    asset_class = str(result.get("asset_class") or "") or _class_from_file(relative_path)
     kind = guess_preview_kind(relative_path, asset_class)
     result["preview_kind"] = kind
     result["asset_class"] = asset_class or result.get("asset_class") or ""
@@ -99,6 +111,8 @@ def _local_result(
     resolved_class = asset_class or ("Verse" if verse_stem else "")
     if online and not resolved_class:
         resolved_class = _fetch_asset_class(asset_path)
+    if not resolved_class:
+        resolved_class = _class_from_file(relative_path)
     preview_id = put_cached(
         relative_path,
         mtime_ns,
