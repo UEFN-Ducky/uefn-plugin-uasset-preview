@@ -517,8 +517,12 @@
       ctx.textBaseline = "middle";
       ctx.textAlign = p.justify === "Center" ? "center" : p.justify === "Right" ? "right" : "left";
       var x = p.justify === "Center" ? w / 2 : p.justify === "Right" ? w - o : o;
+      // Burbank (UEFN's text font) spaces its lines ~1.85x its size while the box keeps the
+      // smaller height: in UEFN the next lines overflow below the text block (measured on UEFN
+      // captures: STARTER/PACK overlaps the subtitle under it, a wrapped chip runs past its pill).
+      var pitch = /^Burbank/i.test(f.family || "") ? lineH * (1.85 / 1.2) : lineH;
       lines.forEach(function (line, i) {
-        var y = o + lineH * (i + 0.5);
+        var y = o + lineH * 0.5 + pitch * i;
         ctx.save();
         if (f.skew) ctx.transform(1, 0, -f.skew, 1, f.skew * y, 0); // Slate's font skew: the top leans right
         var k = widthScale(f);
