@@ -13,7 +13,7 @@
   function compile(graph) {
     var lines = [], cache = {}, busy = {}, uniforms = [], uniformIndex = {}, counter = 0;
     var usesTime = false, textures = [];
-    var over = graph.overrides || { scalar: {}, vector: {}, texture: {} };
+    var over = graph.overrides || { scalar: {}, vector: {}, texture: {}, switch: {} };
 
     function tmp(dim, expr) {
       var name = "t" + (counter++);
@@ -60,6 +60,17 @@
     }
     function constant(node, name, fallback) { return { e: num(node.p[name] == null ? fallback : node.p[name]), d: 1 }; }
     function uv() { return { e: "v_uv", d: 2 }; }
+    var byGuid = null;
+    function declarations() {
+      if (!byGuid) {
+        byGuid = {};
+        Object.keys(graph.nodes).forEach(function (id) {
+          var n = graph.nodes[id];
+          if (n.op === "NamedRerouteDeclaration" && n.p.VariableGuid) byGuid[n.p.VariableGuid] = id;
+        });
+      }
+      return byGuid;
+    }
 
     function binary(node, op, a0, b0) {
       var p = pair(input(node, "A", constant(node, "ConstA", a0)), input(node, "B", constant(node, "ConstB", b0)));
@@ -128,6 +139,15 @@
         case "Sign": return unary(node, function (e) { return "sign(" + e + ")"; });
         case "SquareRoot": return unary(node, function (e) { return "sqrt(max(" + e + ",0.0))"; });
         case "Reroute": return input(node, "Input", { e: "0.0", d: 1 });
+        case "StaticSwitchParameter": case "StaticSwitch": // compile-time choice: True -> A, False -> B
+          if (node.op === "StaticSwitch" && wired(node, "Value")) throw new Error("StaticSwitch driven by a wire is not supported");
+          q = node.op === "StaticSwitchParameter" && over.switch && p.ParameterName in over.switch ? over.switch[p.ParameterName] : !!p.DefaultValue;
+          return input(node, q ? "A" : "B", { e: "0.0", d: 1 });
+        case "NamedRerouteDeclaration": return input(node, "Input", { e: "0.0", d: 1 });
+        case "NamedRerouteUsage": // a named wire: the value of the declaration with the same GUID
+          q = declarations()[p.DeclarationGuid];
+          if (!q) throw new Error("named reroute " + (p.DeclarationGuid || "") + " has no declaration");
+          return emit(q, 0);
         case "Normalize": v = input(node, "VectorInput", { e: "vec3(0.0,0.0,1.0)", d: 3 }); return tmp(v.d, v.d === 1 ? "sign(" + v.e + ")" : "normalize(" + v.e + ")");
         case "Length": v = input(node, "Input", { e: "0.0", d: 1 }); return tmp(1, "length(" + v.e + ")");
         case "Sine": case "Cosine":

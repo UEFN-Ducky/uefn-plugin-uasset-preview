@@ -65,3 +65,28 @@ test("Rotator turns the coordinates around the centre by Speed * Time", () => {
   const clock = compile(graph({ 1: { op: "Rotator", p: {} } }, { EmissiveColor: wire(1) }));
   assert.ok(clock.ok && clock.usesTime);               // unwired Time: the game clock
 });
+
+test("a named reroute reads the declaration with the same GUID", () => {
+  const out = compile(graph({
+    1: { op: "Constant", p: { R: 0.25 } },
+    2: { op: "NamedRerouteDeclaration", p: { Input: wire(1), VariableGuid: "abc" } },
+    3: { op: "NamedRerouteUsage", p: { DeclarationGuid: "abc" } },
+  }, { EmissiveColor: wire(3) }));
+  assert.ok(out.ok, out.error);
+  assert.match(out.source, /0\.25/);
+  const lost = compile(graph({ 1: { op: "NamedRerouteUsage", p: { DeclarationGuid: "nope" } } }, { EmissiveColor: wire(1) }));
+  assert.strictEqual(lost.ok, false);
+});
+
+test("a static switch keeps one branch: its default, or the instance's value", () => {
+  const nodes = {
+    1: { op: "Constant", p: { R: 0.125 } },
+    2: { op: "Constant", p: { R: 0.75 } },
+    3: { op: "StaticSwitchParameter", p: { ParameterName: "Flat", A: wire(1), B: wire(2) } },
+  };
+  const off = compile(graph(nodes, { EmissiveColor: wire(3) }));
+  assert.ok(off.ok, off.error);
+  assert.match(off.source, /0\.75/); assert.doesNotMatch(off.source, /0\.125/); // no DefaultValue: False -> B
+  const on = compile(graph(nodes, { EmissiveColor: wire(3) }, { overrides: { scalar: {}, vector: {}, texture: {}, switch: { Flat: true } } }));
+  assert.match(on.source, /0\.125/); assert.doesNotMatch(on.source, /0\.75/);
+});

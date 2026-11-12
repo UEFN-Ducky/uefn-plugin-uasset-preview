@@ -31,9 +31,17 @@ UI materials (`MD_UI`) are drawn by their own shader: the node graph is read fro
 the `.uasset` (`backend/preview/uasset/material.py`) and compiled to GLSL in the
 panel (`ui/umg/material.js`), with the instance's scalar, vector and texture
 overrides. Supported nodes are the arithmetic, vector, trigonometric, parameter,
-texture-sample, time and panner nodes listed in `material.js`; a graph with any
-other node (material functions included) is refused and keeps its thumbnail, with
-the reason shown in the banner. Material-parameter animation tracks are not played.
+texture-sample, time, panner, rotator, named-reroute and static-switch nodes listed in
+`material.js`; a graph with any other node (material functions included) is refused
+and keeps its thumbnail, with the reason shown in the banner.
+
+Opening a UI material or material instance on its own draws it the same way
+(`backend/preview/material_preview.py`, `ui/asset.html`): live, animated when it reads
+Time, over a checker, black or white background, without UEFN. `UEFN thumbnail` still
+shows UEFN's picture. Surface materials, and UI materials using a node the builder does
+not know, keep the thumbnail and say why. Checked against UEFN's own render of
+`MI_ShopCard_VIP` (`RenderingLibrary.draw_material_to_render_target` at the same Time):
+mean difference under 1/255.
 
 ### Nested widgets and their events
 

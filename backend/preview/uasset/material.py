@@ -75,12 +75,13 @@ def _name(info: Any) -> str:
     return str(info.get("Name") or "") if isinstance(info, dict) else ""
 
 
-def material_graph(path: Path | str, resolve: Callable[[str], Optional[Path]]) -> Optional[dict[str, Any]]:
+def material_graph(path: Path | str, resolve: Callable[[str], Optional[Path]]) -> dict[str, Any]:
     """Graph of the material at ``path``; an instance returns its parent's graph plus overrides.
 
-    ``None`` when this is not a UI material or its parent chain cannot be read.
+    Raises ``ReadError`` saying why when this is not a UI material or its parent chain
+    cannot be read.
     """
-    overrides: dict[str, dict[str, Any]] = {"scalar": {}, "vector": {}, "texture": {}}
+    overrides: dict[str, dict[str, Any]] = {"scalar": {}, "vector": {}, "texture": {}, "switch": {}}
     textures: dict[str, str] = {}
     current = Path(path)
     for _ in range(MAX_PARENTS):
@@ -88,14 +89,14 @@ def material_graph(path: Path | str, resolve: Callable[[str], Optional[Path]]) -
         graph = _graph(pkg)
         if graph is not None:
             if graph["domain"] != "MD_UI":
-                return None
+                raise ReadError(f"{graph['domain']} material: only UI materials (MD_UI) are drawn live")
             graph["overrides"] = overrides
             graph["textures"].update(textures)
             return graph
         instance = next((e for e in pkg.exports if e.outer_index == 0
                          and pkg.class_name(e) == "MaterialInstanceConstant"), None)
         if instance is None:
-            return None
+            raise ReadError("not a Material or a Material Instance")
         props = export_properties(pkg, instance)
         # the instance closest to the widget wins: never overwrite a value already set
         for entry in props.get("ScalarParameterValues") or []:
@@ -111,11 +112,17 @@ def material_graph(path: Path | str, resolve: Callable[[str], Optional[Path]]) -
                 tex = pkg.object_path(ref.index)
                 overrides["texture"].setdefault(_name(entry.get("ParameterInfo")), tex)
                 textures[tex] = pkg.imports[-ref.index - 1].class_name
+        for holder in ("StaticParametersRuntime", "StaticParameters"):
+            block = props.get(holder)
+            for entry in (block.get("StaticSwitchParameters") or []) if isinstance(block, dict) else []:
+                if isinstance(entry, dict) and isinstance(entry.get("Value"), bool):
+                    overrides["switch"].setdefault(_name(entry.get("ParameterInfo")), entry["Value"])
         parent = props.get("Parent")
         if not isinstance(parent, Ref) or parent.index >= 0:
-            return None
-        parent_file = resolve(pkg.object_path(parent.index))
+            raise ReadError("the material instance has no parent material")
+        parent_path = pkg.object_path(parent.index)
+        parent_file = resolve(parent_path)
         if parent_file is None:
-            return None
+            raise ReadError(f"its parent {parent_path} is not a file of this project")
         current = parent_file
-    return None
+    raise ReadError("the chain of parent materials is too long")

@@ -1091,5 +1091,5 @@
     return api;
   }
 
-  window.UmgEngine = { create: create, evalChannel: evalChannel };
+  window.UmgEngine = { create: create, evalChannel: evalChannel, removeChecker: removeChecker };
 })();

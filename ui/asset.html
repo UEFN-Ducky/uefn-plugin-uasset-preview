@@ -10,6 +10,7 @@
       --accent: #6c8cff; --border: #33333a; --err: #f07178;
     }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
       font: 13px/1.45 system-ui, Segoe UI, sans-serif; }
     .pane { display: flex; flex-direction: column; height: 100%; }
@@ -26,6 +27,12 @@
     .img-wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 12px; overflow: auto; }
     .img-wrap img { max-width: 100%; max-height: 100%; object-fit: contain; image-rendering: auto; }
     #viewer { flex: 1; min-height: 220px; }
+    .mat-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 12px; }
+    .mat-wrap canvas { border: 1px solid var(--border); border-radius: 4px; }
+    .mat-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; color: var(--muted); font-size: 12px; }
+    .mat-bar button { padding: 2px 8px; font-size: 12px; }
+    .mat-bar button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+    .note { padding: 6px 12px; color: var(--muted); border-bottom: 1px solid var(--border); font-size: 12px; }
     .banner { padding: 8px 12px; background: #2a2a14; color: #e6d27a; border-bottom: 1px solid var(--border); }
     .err { color: var(--err); padding: 8px 12px; }
     .status { color: var(--muted); padding: 12px; }
@@ -45,16 +52,28 @@
       <button type="button" id="btn-copy">Copy asset path</button>
       <button type="button" id="btn-umg" hidden>Interactive preview</button>
       <button type="button" id="btn-mesh" hidden>Load 3D preview</button>
+      <button type="button" id="btn-live" hidden>Live material</button>
       <button type="button" id="btn-mat" hidden>Load material preview</button>
       <button type="button" id="btn-tex" hidden>Load texture preview</button>
     </div>
   </div>
   <div id="banner" class="banner" hidden></div>
+  <div id="mat-note" class="note" hidden></div>
   <div id="err" class="err" hidden></div>
   <div class="body">
     <div id="status" class="status">Loading…</div>
     <div class="img-wrap" id="img-wrap" hidden><img id="thumb" alt="preview" /></div>
     <div id="viewer" hidden></div>
+    <div class="mat-wrap" id="mat-wrap" hidden>
+      <canvas id="mat"></canvas>
+      <div class="mat-bar">
+        <span>Background</span>
+        <button type="button" data-bg="checker" aria-pressed="true">Checker</button>
+        <button type="button" data-bg="dark" aria-pressed="false">Dark</button>
+        <button type="button" data-bg="light" aria-pressed="false">Light</button>
+        <span id="mat-info"></span>
+      </div>
+    </div>
   </div>
   <details id="tree-details" open hidden>
     <summary>Widget tree</summary>
@@ -66,6 +85,8 @@
   </details>
 </div>
 <script src="viewer.bundle.js"></script>
+<script src="umg/material.js"></script>
+<script src="umg/engine.js"></script>
 <script>
 (function () {
   var CHANNEL = "uefn-plugin-ui";
@@ -144,7 +165,144 @@
     });
   }
 
+  // ---- live material: the graph compiled to a shader (ui/umg/material.js, as in the UMG preview)
+  var live = null; // { material, renderer, images, background, raf }
+  var MAT_MAX_PX = 1024;
+
+  function noteMaterial(msg) {
+    var el = document.getElementById("mat-note");
+    el.hidden = !msg; el.textContent = msg || "";
+  }
+
+  function loadTexture(key, asset) {
+    return new Promise(function (resolve) {
+      if (!asset || !asset.url) { resolve(null); return; }
+      var img = new Image();
+      img.crossOrigin = "anonymous"; // the panel is sandboxed: pixels are readable only through CORS
+      img.onload = function () {
+        // Content Browser thumbnails bake a grey checkerboard where the texture is transparent
+        var clean = asset.quality === "thumbnail" && window.UmgEngine && window.UmgEngine.removeChecker;
+        resolve(clean ? window.UmgEngine.removeChecker(img) : img);
+      };
+      img.onerror = function () { resolve(null); };
+      img.src = asset.url;
+    });
+  }
+
+  /* Resolves to "" once the material is on screen, else to the reason it is not. */
+  async function startLiveMaterial() {
+    if (!window.UmgMaterial) return "the shader builder (umg/material.js) is missing";
+    var res = await rpc("load_material_shader", { relative_path: filePath });
+    if (!res || !res.ok) return (res && res.error) || "the material could not be read";
+    var material = window.UmgMaterial.compile(res.graph);
+    if (!material.ok) return material.error;
+    var renderer = window.UmgMaterial.createRenderer();
+    if (!renderer) return "WebGL is not available in this panel";
+    var images = {}, missing = [], thumbs = 0;
+    await Promise.all(material.textures.map(function (key) {
+      var asset = (res.textures || {})[key];
+      return loadTexture(key, asset).then(function (img) {
+        if (img) { images[key] = img; if (asset.quality === "thumbnail") thumbs++; }
+        else missing.push((asset && asset.name) || key.split(".").pop());
+      });
+    }));
+    if (missing.length) return "texture " + missing.join(", ") + " could not be loaded";
+    stopLiveMaterial();
+    live = { material: material, renderer: renderer, images: images, background: (live && live.background) || "checker",
+             startedAt: performance.now(), raf: 0, frames: 0 };
+    var info = [res.graph.blend.replace("BLEND_", ""), Object.keys(res.graph.nodes).length + " nodes"];
+    if (material.usesTime) info.push("animated");
+    if (thumbs) info.push(thumbs + " texture" + (thumbs > 1 ? "s" : "") + " from thumbnails");
+    document.getElementById("mat-info").textContent = "· " + info.join(" · ");
+    showLive();
+    if (!drawLive()) {
+      var why = material.error || "the shader did not draw";
+      stopLiveMaterial();
+      return why;
+    }
+    return "";
+  }
+
+  function stopLiveMaterial() {
+    if (live && live.raf) cancelAnimationFrame(live.raf);
+    if (live) live.raf = 0;
+  }
+
+  function showLive() {
+    document.getElementById("status").hidden = true;
+    document.getElementById("viewer").hidden = true;
+    document.getElementById("img-wrap").hidden = true;
+    document.getElementById("mat-wrap").hidden = false;
+    document.getElementById("btn-live").hidden = true;
+    var btn = document.getElementById("btn-mat");
+    btn.hidden = false; btn.textContent = "UEFN thumbnail";
+  }
+
+  function paintBackground(ctx, w, h, kind) {
+    if (kind === "dark" || kind === "light") {
+      ctx.fillStyle = kind === "dark" ? "#000" : "#fff";
+      ctx.fillRect(0, 0, w, h);
+      return;
+    }
+    var cell = Math.max(8, Math.round(w / 16));
+    ctx.fillStyle = "#3a3a3a"; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = "#5c5c5c";
+    for (var y = 0; y * cell < h; y++) for (var x = 0; x * cell < w; x++) if ((x + y) & 1) ctx.fillRect(x * cell, y * cell, cell, cell);
+  }
+
+  /* Draws one frame; an animated material (it reads Time) asks for the next one. */
+  function drawLive() {
+    if (!live) return false;
+    var canvas = document.getElementById("mat"), wrap = document.getElementById("mat-wrap");
+    var side = Math.max(64, Math.min(wrap.clientWidth - 24, wrap.clientHeight - 56));
+    var dpr = window.devicePixelRatio || 1, px = Math.min(MAT_MAX_PX, Math.round(side * dpr));
+    if (canvas.width !== px) { canvas.width = canvas.height = px; }
+    canvas.style.width = canvas.style.height = side + "px";
+    var ok = live.renderer.render(live.material, px, px, {
+      time: (performance.now() - live.startedAt) / 1000, tint: [1, 1, 1, 1], images: live.images
+    });
+    if (!ok) return false;
+    var ctx = canvas.getContext("2d"), r = live.renderer.region;
+    paintBackground(ctx, px, px, live.background);
+    ctx.save();
+    if (live.material.additive) ctx.globalCompositeOperation = "lighter";
+    ctx.drawImage(live.renderer.canvas, r.x, r.y, r.w, r.h, 0, 0, px, px);
+    ctx.restore();
+    live.frames++;
+    live.drawnAt = performance.now();
+    if (live.material.usesTime && !live.raf) nextFrame();
+    return true;
+  }
+
+  // 60 images a second are plenty, whatever the screen's rate (as in the UMG preview)
+  var MAT_FRAME_MS = 1000 / 60 - 2;
+  function nextFrame() {
+    live.raf = requestAnimationFrame(function (now) {
+      live.raf = 0;
+      if (document.getElementById("mat-wrap").hidden) return;
+      if (now - live.drawnAt < MAT_FRAME_MS) nextFrame();
+      else drawLive();
+    });
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll("[data-bg]"), function (btn) {
+    btn.onclick = function () {
+      if (!live) return;
+      live.background = btn.getAttribute("data-bg");
+      Array.prototype.forEach.call(document.querySelectorAll("[data-bg]"), function (b) { b.setAttribute("aria-pressed", String(b === btn)); });
+      drawLive();
+    };
+  });
+  window.addEventListener("resize", function () { if (live && !document.getElementById("mat-wrap").hidden && !live.raf) drawLive(); });
+  window.__matPreview = function () {
+    return live ? { frames: live.frames, animated: live.material.usesTime, textures: Object.keys(live.images).length,
+                    error: live.material.error || "" } : null;
+  };
+
   function showImage(url) {
+    stopLiveMaterial();
+    document.getElementById("mat-wrap").hidden = true;
+    if (live) document.getElementById("btn-live").hidden = false;
     document.getElementById("status").hidden = true;
     document.getElementById("viewer").hidden = true;
     var wrap = document.getElementById("img-wrap");
@@ -204,7 +362,17 @@
       if (!wantsDetails) { location.replace("umg.html?file=" + encodeURIComponent(filePath)); return; }
       document.getElementById("btn-umg").hidden = false;
     }
-    if (result && result.preview_url && (result.mode === "texture" || result.mode === "material" || result.mode === "image" || result.mode === "badge" || result.mode === "asset" || result.mode === "verse")) {
+    // A UI material is drawn by its own shader (no UEFN needed); anything else keeps its thumbnail.
+    var liveShown = false;
+    if (result && result.preview_kind === "material") {
+      var why = "";
+      try { why = await startLiveMaterial(); } catch (e) { why = e.message || String(e); }
+      liveShown = !why;
+      noteMaterial(why ? "Live material unavailable: " + why + ". Showing the UEFN thumbnail." : "");
+    }
+    if (liveShown) {
+      // drawn live
+    } else if (result && result.preview_url && (result.mode === "texture" || result.mode === "material" || result.mode === "image" || result.mode === "badge" || result.mode === "asset" || result.mode === "verse")) {
       showImage(result.preview_url);
     } else {
       document.getElementById("status").textContent = "No thumbnail yet. Use the buttons above when UEFN is online.";
@@ -215,7 +383,7 @@
     // Auto-load mesh / material / texture when kind is clear.
     if (result && result.supports_mesh_preview && result.listener_online) {
       document.getElementById("btn-mesh").click();
-    } else if (result && result.supports_material_preview && result.listener_online) {
+    } else if (result && result.supports_material_preview && result.listener_online && !liveShown) {
       document.getElementById("btn-mat").click();
     } else if (result && result.supports_texture_preview && result.listener_online) {
       document.getElementById("btn-tex").click();
@@ -250,12 +418,22 @@
   };
   document.getElementById("btn-mat").onclick = function () {
     showErr("");
+    if (live && result && result.preview_url) {
+      showImage(result.preview_url); // the thumbnail already known, at once
+      if (!result.listener_online) return;
+    }
     rpc("load_material_preview", { relative_path: filePath }).then(function (res) {
       if (!res || !res.preview_url) throw new Error((res && res.error) || "Material preview failed");
       result = Object.assign({}, result || {}, res);
       renderMeta(result);
       showImage(res.preview_url);
     }).catch(function (e) { showErr(e.message); });
+  };
+  document.getElementById("btn-live").onclick = function () {
+    showErr("");
+    if (!live) return;
+    showLive();
+    drawLive();
   };
   document.getElementById("btn-tex").onclick = function () {
     showErr("");
