@@ -167,7 +167,8 @@
       var bh = Math.max(MATERIAL_STEP_PX, Math.ceil(ph * cap / MATERIAL_STEP_PX) * MATERIAL_STEP_PX);
       var id = key + "|" + bw + "x" + bh + "|" + tint.join(",") + "|" + (params ? JSON.stringify(params) : "");
       var now = (performance.now() - startedAt) / 1000, entry = materialCache[id];
-      if (!entry || m.usesTime) {
+      var live = m.usesTime || !!params; // changes from frame to frame: rendered every time, never cached
+      if (!entry || live) {
         var sources = {};
         for (var i = 0; i < m.textures.length; i++) {
           var img = images[m.textures[i]];
@@ -181,7 +182,7 @@
           if (m.error && !m.reported) { m.reported = true; materialErrors.push({ name: (spec.assets[key] || {}).name || key, error: m.error }); delete materials[key]; }
           return false;
         }
-        if (m.usesTime) entry = { canvas: materialRenderer.canvas, at: now }; // drawn at once, before the next render
+        if (live) entry = { canvas: materialRenderer.canvas, at: now }; // drawn at once, before the next render
         else {
           if (materialCacheSize >= MATERIAL_CACHE_MAX) { materialCache = {}; materialCacheSize = 0; }
           entry = materialCache[id] = { canvas: document.createElement("canvas"), at: now };
@@ -464,7 +465,8 @@
       ctx.closePath();
     }
 
-    function drawBrush(brush, color, w, h) {
+    function drawBrush(brush, color, w, h, params) {
+      params = params || brush.params; // material parameters animated by a widget animation win
       if (!brush || brush.draw === "NoDrawType" || w <= 0 || h <= 0) return;
       var tint = mul(brush.tint, color);
       if (brush.draw === "RoundedBox") {
@@ -473,7 +475,7 @@
         if (brush.resource) { // a rounded box with a picture: the picture, cut to the rounded shape
           ctx.save();
           roundRect(0, 0, w, h, radii); ctx.clip();
-          drawBrush({ draw: "Image", tint: brush.tint, size: brush.size, margin: brush.margin, resource: brush.resource, params: brush.params }, color, w, h);
+          drawBrush({ draw: "Image", tint: brush.tint, size: brush.size, margin: brush.margin, resource: brush.resource, params: params }, color, w, h);
           ctx.restore();
           roundRect(half, half, w - o.width, h - o.width, radii);
         } else {
@@ -485,7 +487,7 @@
       }
       if (!brush.resource) { ctx.fillStyle = css(tint); ctx.fillRect(0, 0, w, h); return; }
       var asset = spec.assets[brush.resource] || {};
-      if (asset.kind === "material" && drawMaterial(brush.resource, tint, w, h, brush.params)) return;
+      if (asset.kind === "material" && drawMaterial(brush.resource, tint, w, h, params)) return;
       if (images[brush.resource] === "clear") return;
       var img = tinted(brush.resource, asset.kind === "material" ? [1, 1, 1, 1] : tint);
       ctx.save();
@@ -584,7 +586,7 @@
         ctx.globalAlpha = opacity;
         painted.push({ node: n, matrix: ctx.getTransform() });
         if (n.clip) { ctx.beginPath(); ctx.rect(0, 0, r.w, r.h); ctx.clip(); }
-        if (n.kind === "Image") drawBrush(n.props.brush, a.color || n.props.color, r.w, r.h);
+        if (n.kind === "Image") drawBrush(n.props.brush, a.color || n.props.color, r.w, r.h, a.mat);
         else if (n.kind === "TextBlock") drawText(n, r.w, r.h);
         else if (n.kind === "Button") drawButton(n, r.w, r.h);
         else if (n.kind === "Border") drawBrush(n.props.brush, n.props.color, r.w, r.h);
@@ -892,6 +894,7 @@
     }
 
     // ---- animation ------------------------------------------------------
+    var VISIBILITY = ["Visible", "Collapsed", "Hidden", "HitTestInvisible", "SelfHitTestInvisible"]; // ESlateVisibility order
     function clearAnim() { allNodes.forEach(function (n) { n.anim = {}; }); }
     function applyTracks(scope, anim, t) {
       anim.tracks.forEach(function (tr) {
@@ -912,6 +915,23 @@
           var m = (tr.prop === "Padding" ? n.slot.pad : n.slot.offsets) || [0, 0, 0, 0], next = m.slice();
           ["l", "t", "r", "b"].forEach(function (k, i) { v = evalChannel(c[k], time); if (v != null) next[i] = v; });
           if (tr.prop === "Padding") n.anim.pad = next; else n.anim.offsets = next;
+        } else if (tr.kind === "visibility") {
+          var step = tr["default"], steps = tr.steps || [];
+          for (var si = 0; si < steps.length; si++) { if (steps[si][0] <= time || si === 0) step = steps[si][1]; else break; }
+          if (step != null && VISIBILITY[step]) n.anim.visibility = VISIBILITY[step];
+        } else if (tr.kind === "material") {
+          var mat = n.anim.mat || (n.anim.mat = { scalar: {}, vector: {} });
+          Object.keys(c).forEach(function (k) {
+            v = evalChannel(c[k], time);
+            if (v == null) return;
+            var parts = k.split(":");
+            if (parts[0] === "s") mat.scalar[parts[1]] = v;
+            else {
+              var base = (n.props.brush && n.props.brush.params && n.props.brush.params.vector && n.props.brush.params.vector[parts[1]]) || mat.vector[parts[1]] || null;
+              var vec = mat.vector[parts[1]] || (base ? base.slice() : [0, 0, 0, 1]);
+              vec["rgba".indexOf(parts[2])] = v; mat.vector[parts[1]] = vec;
+            }
+          });
         }
       });
     }

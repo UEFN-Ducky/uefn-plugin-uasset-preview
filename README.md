@@ -41,7 +41,10 @@ A widget placed inside another keeps its own animations. The event bindings stor
 in each Widget Blueprint (`button event -> play / reverse an animation`, or a call
 into Verse) are read from the file and honoured: hovering a card plays the hover
 animation its own blueprint binds, clicking it plays its select animation, and a
-bound Verse function is listed in the event log (Verse itself is not run). A
+bound Verse function is listed in the event log (Verse itself is not run). Animation
+tracks played: transform, opacity, colour, margin/padding, visibility steps (a widget
+shown or hidden during an animation) and material parameters (scalar and colour, e.g. a
+wheel's Rotation driving its material's Rotator). A
 blueprint listening to a button inside a nested one (`Card_1 -> Root_Button ->
 clicked`) is handled the same way. Logic written in Verse or in a Blueprint graph
 is not executed.

@@ -174,6 +174,13 @@
           v = "(" + a.e + " >= " + b.e + " ? " + cast(gt, dim).e + " : " + cast(lt, dim).e + ")";
           if (eq) v = "(abs(" + a.e + " - " + b.e + ") <= " + num(p.EqualsThreshold == null ? 0.00001 : p.EqualsThreshold) + " ? " + cast(eq, dim).e + " : " + v + ")";
           return tmp(dim, v);
+        case "Rotator": // Unreal: Base = Coordinate - Center; angle = Speed * Time; (cos -sin; sin cos) * Base + Center
+          if (!wired(node, "Time")) usesTime = true;
+          a = cast(input(node, "Coordinate", uv()), 2); b = cast(input(node, "Time", { e: "u_time", d: 1 }), 1);
+          c = { e: lit([p.CenterX == null ? 0.5 : p.CenterX, p.CenterY == null ? 0.5 : p.CenterY]), d: 2 };
+          q = tmp(1, num(p.Speed == null ? 0.25 : p.Speed) + " * " + b.e);
+          v = tmp(2, a.e + " - " + c.e);
+          return tmp(2, "vec2(cos(" + q.e + ") * " + v.e + ".x - sin(" + q.e + ") * " + v.e + ".y, sin(" + q.e + ") * " + v.e + ".x + cos(" + q.e + ") * " + v.e + ".y) + " + c.e);
         case "Panner":
           usesTime = true;
           a = cast(input(node, "Coordinate", uv()), 2); b = cast(input(node, "Time", { e: "u_time", d: 1 }), 1);

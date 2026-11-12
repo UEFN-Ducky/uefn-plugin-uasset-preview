@@ -50,3 +50,18 @@ test("a wire loop is an error, not a hang", () => {
 test("non-UI materials are refused", () => {
   assert.strictEqual(compile(graph({}, {}, { domain: "MD_Surface" })).ok, false);
 });
+
+test("Rotator turns the coordinates around the centre by Speed * Time", () => {
+  const out = compile(graph({
+    1: { op: "ScalarParameter", p: { ParameterName: "Rotation", DefaultValue: 0 } },
+    2: { op: "Rotator", p: { Time: wire(1), Speed: 0.5 } },
+    3: { op: "TextureCoordinate", p: {} },
+    4: { op: "Distance", p: { A: wire(2), B: wire(3) } },
+  }, { EmissiveColor: wire(4) }));
+  assert.ok(out.ok, out.error);
+  assert.match(out.source, /0\.5 \* u\d/);          // Speed * Time (Time wired to the parameter)
+  assert.match(out.source, /vec2\(0\.5,0\.5\)/);   // default centre
+  assert.strictEqual(out.usesTime, false);             // its Time is the parameter, not the clock
+  const clock = compile(graph({ 1: { op: "Rotator", p: {} } }, { EmissiveColor: wire(1) }));
+  assert.ok(clock.ok && clock.usesTime);               // unwired Time: the game clock
+});

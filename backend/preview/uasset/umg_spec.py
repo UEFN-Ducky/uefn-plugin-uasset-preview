@@ -542,6 +542,30 @@ def _animations(builder: _Builder, pkg: Package, blueprint: Export) -> list[dict
                         channels = {"l": sec.get("LeftCurve"), "t": sec.get("TopCurve"),
                                     "r": sec.get("RightCurve"), "b": sec.get("BottomCurve")}
                         kind = "margin"
+                    elif tcls in ("MovieSceneEnumTrack", "MovieSceneByteTrack") and path == "Visibility":
+                        # steps, not a curve: each key holds its value until the next one
+                        curve = sec.get("EnumCurve") or sec.get("ByteCurve") or {}
+                        times, values = curve.get("Times") or [], curve.get("Values") or []
+                        if len(times) != len(values):
+                            continue
+                        rng = sec.get("SectionRange") or {}
+                        tracks.append({**target, "kind": "visibility", "prop": path,
+                                       "steps": [[t / rate, int(v)] for t, v in zip(times, values)],
+                                       "default": int(curve["DefaultValue"]) if curve.get("bHasDefaultValue") else None,
+                                       "start": (rng.get("lower") or 0) / rate,
+                                       "end": (rng["upper"] / rate) if rng.get("upper") is not None else None})
+                        continue
+                    elif tcls == "MovieSceneWidgetMaterialTrack":
+                        # a parameter of the material on the widget's brush (e.g. rays turning)
+                        channels = {}
+                        for entry in sec.get("ScalarParameterNamesAndCurves") or []:
+                            if isinstance(entry, dict) and entry.get("ParameterName"):
+                                channels["s:" + str(entry["ParameterName"])] = entry.get("ParameterCurve")
+                        for entry in sec.get("ColorParameterNamesAndCurves") or []:
+                            if isinstance(entry, dict) and entry.get("ParameterName"):
+                                for comp, key in (("r", "RedCurve"), ("g", "GreenCurve"), ("b", "BlueCurve"), ("a", "AlphaCurve")):
+                                    channels["c:" + str(entry["ParameterName"]) + ":" + comp] = entry.get(key)
+                        kind = "material"
                     else:
                         unsupported.add(tcls)
                         continue
@@ -556,7 +580,7 @@ def _animations(builder: _Builder, pkg: Package, blueprint: Export) -> list[dict
                 add_tracks(binding.get("Tracks"), targets.get(binding.get("ObjectGuid")))
         add_tracks(scene.get("Tracks"), None)
         for cls in sorted(unsupported):
-            builder.warn(f"Animation track {cls} is not played (material parameters need Unreal's renderer).")
+            builder.warn(f"Animation track {cls} is not played by the preview.")
         start = (playback.get("lower") or 0) / rate
         end = (playback.get("upper") or 0) / rate
         out.append({"name": str(anim.get("DisplayLabel") or anim_exp.object_name), "start": start,
