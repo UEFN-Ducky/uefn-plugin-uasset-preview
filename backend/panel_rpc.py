@@ -35,6 +35,37 @@ def load_widget_tree(relative_path: str = "", **_kwargs: Any) -> dict[str, Any]:
     return _load(str(relative_path or ""))
 
 
+def save_umg_edits(relative_path: str = "", edits: Any = None, save_in_uefn_first: bool = False,
+                   **_kwargs: Any) -> dict[str, Any]:
+    from .preview.umg_edit import save_umg_edits as _save
+
+    return _save(str(relative_path or ""), edits, bool(save_in_uefn_first))
+
+
+def restore_umg_backup(relative_path: str = "", **_kwargs: Any) -> dict[str, Any]:
+    from .preview.umg_edit import restore_umg_backup as _restore
+
+    return _restore(str(relative_path or ""))
+
+
+def find_umg_images(relative_path: str = "", query: str = "", **_kwargs: Any) -> dict[str, Any]:
+    from .preview.umg_edit import find_umg_images as _find
+
+    return _find(str(relative_path or ""), str(query or ""))
+
+
+def find_widget_blueprint(name: str = "", **_kwargs: Any) -> dict[str, Any]:
+    from .preview.umg_find import find_widget_blueprint as _find
+
+    return _find(str(name or ""))
+
+
+def umg_backup_count(relative_path: str = "", **_kwargs: Any) -> dict[str, Any]:
+    from .preview.umg_edit import umg_backup_count as _count
+
+    return _count(str(relative_path or ""))
+
+
 def load_umg_preview(relative_path: str = "", **_kwargs: Any) -> dict[str, Any]:
     from .preview.umg_preview import load_umg_preview as _load
 
@@ -93,6 +124,11 @@ def register_panel_rpcs(api: Any) -> None:
     api.register_panel_rpc("load_texture_preview", load_texture_preview)
     api.register_panel_rpc("load_widget_tree", load_widget_tree)
     api.register_panel_rpc("load_umg_preview", load_umg_preview)
+    api.register_panel_rpc("save_umg_edits", save_umg_edits)
+    api.register_panel_rpc("restore_umg_backup", restore_umg_backup)
+    api.register_panel_rpc("umg_backup_count", umg_backup_count)
+    api.register_panel_rpc("find_umg_images", find_umg_images)
+    api.register_panel_rpc("find_widget_blueprint", find_widget_blueprint)
     api.register_panel_rpc("open_asset_in_uefn", open_asset_in_uefn)
     api.register_panel_rpc("read_hex", read_hex)
     api.register_panel_rpc("model_media_url", model_media_url)

@@ -101,9 +101,12 @@
     var viewport = { w: spec.design_size[0], h: spec.design_size[1] };
     var layoutSize = { w: viewport.w, h: viewport.h };
     var dirty = true, raf = 0, disposed = false;
-    var playing = null; // {anim, time, loop, speed, last, sources}
+    var players = []; // running or held animations: {scope, anim, time, dir, speed, loop, state, last, sources, manual}
+    var rootScope = null;
+    function anyPlaying() { return players.some(function (p) { return p.state === "playing"; }); }
     var audio = null, audioBuffers = {}, muted = false;
     var showHints = false;
+    var editMode = false, selected = null, drag = null;
 
     function emit(type, detail) { listeners.forEach(function (fn) { fn(type, detail || {}); }); }
     function invalidate() { dirty = true; if (!raf && !disposed) raf = requestAnimationFrame(frame); }
@@ -120,7 +123,79 @@
     })(spec.root, null, false);
     allNodes.forEach(function (n) { if (!(n.name in nodesByName)) nodesByName[n.name] = n; });
 
+    // Every Widget Blueprint in the tree is a scope: its own widget names, animations and event bindings.
+    rootScope = { owner: null, top: spec.root, byName: nodesByName, anims: spec.animations || [], events: spec.events || [] };
+    allNodes.forEach(function (owner) {
+      if (!owner.anims && !owner.events) return;
+      var byName = {};
+      (function collect(n) {
+        n.children.forEach(function (c) {
+          if (!(c.name in byName)) byName[c.name] = c;
+          if (!c.anims && !c.events) collect(c); // a deeper blueprint keeps its own names
+        });
+      })(owner);
+      owner.scope = { owner: owner, top: owner.children[0] || owner, byName: byName, anims: owner.anims || [], events: owner.events || [] };
+    });
+    function scopeOf(n) { // the blueprint a widget belongs to
+      for (var cur = n.parent; cur; cur = cur.parent) if (cur.scope) return cur.scope;
+      return rootScope;
+    }
+
     // ---- assets ---------------------------------------------------------
+    // UI materials run as real shaders; one that fails to build keeps its thumbnail.
+    var materials = {}, materialRenderer = null, materialErrors = [], timeDrawn = false, startedAt = performance.now();
+    if (window.UmgMaterial) {
+      Object.keys(spec.materials || {}).forEach(function (key) {
+        var built = window.UmgMaterial.compile(spec.materials[key]);
+        if (built.ok) materials[key] = built;
+        else materialErrors.push({ name: (spec.assets[key] || {}).name || key, error: built.error });
+      });
+      if (Object.keys(materials).length) materialRenderer = window.UmgMaterial.createRenderer();
+    }
+    /* A still material is rendered once per size and kept as a picture; an animated one (it reads
+     * Time) is rendered every frame. The picture is capped in resolution (UI materials are soft
+     * gradients) and its size moves in 32 px steps, so a widget growing in an animation does not
+     * re-render a still material every frame. */
+    var MATERIAL_MAX_PX = 512, MATERIAL_STEP_PX = 32, MATERIAL_CACHE_MAX = 64;
+    var materialCache = {}, materialCacheSize = 0;
+    function drawMaterial(key, tint, w, h, params) {
+      var m = materials[key];
+      if (!m || !materialRenderer || m.program === null || w <= 0 || h <= 0) return false;
+      var t = ctx.getTransform(), scale = Math.max(Math.hypot(t.a, t.b), Math.hypot(t.c, t.d));
+      var pw = w * scale, ph = h * scale, cap = Math.min(1, MATERIAL_MAX_PX / Math.max(pw, ph));
+      var bw = Math.max(MATERIAL_STEP_PX, Math.ceil(pw * cap / MATERIAL_STEP_PX) * MATERIAL_STEP_PX);
+      var bh = Math.max(MATERIAL_STEP_PX, Math.ceil(ph * cap / MATERIAL_STEP_PX) * MATERIAL_STEP_PX);
+      var id = key + "|" + bw + "x" + bh + "|" + tint.join(",") + "|" + (params ? JSON.stringify(params) : "");
+      var now = (performance.now() - startedAt) / 1000, entry = materialCache[id];
+      if (!entry || m.usesTime) {
+        var sources = {};
+        for (var i = 0; i < m.textures.length; i++) {
+          var img = images[m.textures[i]];
+          if (!img || img === "missing" || img === "clear") return false;
+          sources[m.textures[i]] = img;
+        }
+        var ok = materialRenderer.render(m, bw, bh, {
+          time: now, tint: tint, images: sources, scalar: params && params.scalar, vector: params && params.vector
+        });
+        if (!ok) {
+          if (m.error && !m.reported) { m.reported = true; materialErrors.push({ name: (spec.assets[key] || {}).name || key, error: m.error }); delete materials[key]; }
+          return false;
+        }
+        if (m.usesTime) entry = { canvas: materialRenderer.canvas, at: now }; // drawn at once, before the next render
+        else {
+          if (materialCacheSize >= MATERIAL_CACHE_MAX) { materialCache = {}; materialCacheSize = 0; }
+          entry = materialCache[id] = { canvas: document.createElement("canvas"), at: now };
+          entry.canvas.width = bw; entry.canvas.height = bh; materialCacheSize++;
+          var copy = entry.canvas.getContext("2d");
+          copy.drawImage(materialRenderer.canvas, 0, 0);
+        }
+      }
+      if (m.usesTime) timeDrawn = true;
+      if (m.additive) { ctx.save(); ctx.globalCompositeOperation = "lighter"; }
+      ctx.drawImage(entry.canvas, 0, 0, w, h);
+      if (m.additive) ctx.restore();
+      return true;
+    }
     Object.keys(spec.assets || {}).forEach(function (key) {
       var a = spec.assets[key];
       if ((a.kind !== "texture" && a.kind !== "material") || !a.url) { images[key] = "missing"; return; }
@@ -162,16 +237,25 @@
     function fontCss(font) {
       var face = String(font.typeface || "").toLowerCase(), weight = 700, italic = face.indexOf("italic") >= 0;
       Object.keys(WEIGHTS).forEach(function (k) { if (face.indexOf(k) >= 0) weight = WEIGHTS[k]; });
-      return (italic ? "italic " : "") + weight + " " + (font.size * PT_TO_PX) + "px " +
-        (options.fontFamily || '"Segoe UI", "Noto Sans", Arial, sans-serif');
+      if (weight === 400 && /^Burbank/i.test(font.family || "")) weight = 600; // Burbank Regular is a heavy face
+      // Fortnite's fonts are not on this PC: the real one is used when installed, else the closest system face.
+      var family = /^Burbank/i.test(font.family || "") ? '"Burbank Small", "Burbank Big Condensed", "Segoe UI", "Noto Sans", Arial, sans-serif'
+        : '"Segoe UI", "Noto Sans", Arial, sans-serif';
+      return (italic ? "italic " : "") + weight + " " + (font.size * PT_TO_PX) + "px " + (options.fontFamily || family);
     }
     function textOf(node) {
       var p = node.props, s = node.anim.text != null ? node.anim.text : p.text || "";
       if (p.transform === "ToUpper") s = s.toUpperCase(); else if (p.transform === "ToLower") s = s.toLowerCase();
       return s;
     }
+    // Burbank is wider than the system face that stands in for it. These factors were measured
+    // against UEFN's own rendering of the same lines, so wrapping and sizes land where UEFN puts them.
+    function widthScale(font) {
+      if (!/^Burbank/i.test(font.family || "")) return 1;
+      return /black|bold|heavy/i.test(font.typeface || "") ? 1.04 : 1.11;
+    }
     function textLines(node, maxWidth) {
-      var p = node.props;
+      var p = node.props, k = widthScale(p.font);
       ctx.font = fontCss(p.font);
       try { ctx.letterSpacing = (p.font.letter_spacing / 1000 * p.font.size * PT_TO_PX) + "px"; } catch (e) {}
       var limit = p.wrap_at > 0 ? p.wrap_at : (p.wrap && maxWidth > 0 ? maxWidth : 0);
@@ -181,7 +265,7 @@
         var line = "";
         para.split(" ").forEach(function (word) {
           var next = line ? line + " " + word : word;
-          if (line && ctx.measureText(next).width > limit) { out.push(line); line = word; } else line = next;
+          if (line && ctx.measureText(next).width * k > limit) { out.push(line); line = word; } else line = next;
         });
         out.push(line);
       });
@@ -191,11 +275,26 @@
       var p = node.props, lines = textLines(node, maxWidth), w = 0;
       lines.forEach(function (l) { w = Math.max(w, ctx.measureText(l).width); });
       var lineH = p.font.size * PT_TO_PX * 1.2 * (p.line_height || 1), o = p.font.outline_size || 0;
-      return [w + o * 2, lines.length * lineH + o * 2];
+      return [w * widthScale(p.font) + o * 2, lines.length * lineH + o * 2];
     }
 
     // ---- layout ---------------------------------------------------------
-    function collapsed(n) { return (n.anim.visibility || n.visibility) === "Collapsed"; }
+    // Design time, as in UEFN's designer: every widget is shown whatever its Visibility,
+    // unless it is hidden with the designer's eye icon.
+    var designTime = !!options.designTime;
+    function visibilityOf(n) {
+      if (designTime) return n.design_hidden ? "Collapsed" : "Visible";
+      return n.anim.visibility || n.visibility;
+    }
+    function collapsed(n) { return visibilityOf(n) === "Collapsed"; }
+    function gridCells(n, kids) { // uniform grid: every cell as large as the largest child
+      var p = n.props, sp = p.slot_padding || [0, 0, 0, 0], cols = 0, rows = 0, cw = p.min_slot_width || 0, ch = p.min_slot_height || 0;
+      kids.forEach(function (c) {
+        cols = Math.max(cols, (c.slot.column || 0) + 1); rows = Math.max(rows, (c.slot.row || 0) + 1);
+        cw = Math.max(cw, c.desired[0] + sp[0] + sp[2]); ch = Math.max(ch, c.desired[1] + sp[1] + sp[3]);
+      });
+      return { cols: cols, rows: rows, w: cw, h: ch, pad: sp };
+    }
     function pad(n) { return n.anim.pad || n.slot.pad || [0, 0, 0, 0]; }
 
     function measure(n) {
@@ -212,6 +311,10 @@
             var b = boxed(c);
             if (vertical) { d[0] = Math.max(d[0], b[0]); d[1] += b[1]; } else { d[0] += b[0]; d[1] = Math.max(d[1], b[1]); }
           });
+          break;
+        case "UniformGridPanel":
+          var cells = gridCells(n, kids);
+          d = [cells.cols * cells.w, cells.rows * cells.h];
           break;
         case "WidgetSwitcher":
           var active = n.children[n.anim.active != null ? n.anim.active : p.active];
@@ -262,6 +365,7 @@
 
     function alignAxis(mode, start, size, want) {
       if (mode === "Fill") return [start, size];
+      want = Math.min(want, Math.max(0, size)); // Slate's AlignChild never gives a child more than its cell
       if (mode === "Center") return [start + (size - want) / 2, want];
       if (mode === "Right" || mode === "Bottom") return [start + size - want, want];
       return [start, want];
@@ -304,6 +408,14 @@
           var len = (c.slot.fill ? (weight > 0 ? spare * c.slot.fill_value / weight : 0) : (vertical ? c.desired[1] : c.desired[0])) + extra;
           if (vertical) place(c, 0, cursor, w, len); else place(c, cursor, 0, len, h);
           cursor += len;
+        });
+      } else if (n.kind === "UniformGridPanel") {
+        var grid = gridCells(n, kids), cellW = grid.cols ? w / grid.cols : 0, cellH = grid.rows ? h / grid.rows : 0;
+        kids.forEach(function (c) {
+          var gx = (c.slot.column || 0) * cellW + grid.pad[0], gy = (c.slot.row || 0) * cellH + grid.pad[1];
+          var gw = cellW - grid.pad[0] - grid.pad[2], gh = cellH - grid.pad[1] - grid.pad[3];
+          var ax = alignAxis(c.slot.h || "Left", gx, gw, c.desired[0]), ay = alignAxis(c.slot.v || "Top", gy, gh, c.desired[1]);
+          arrange(c, ax[0], ay[0], Math.max(0, ax[1]), Math.max(0, ay[1]));
         });
       } else if (n.kind === "ScaleBox") {
         kids.forEach(function (c) {
@@ -358,13 +470,22 @@
       if (brush.draw === "RoundedBox") {
         var o = brush.outline || { radii: [0, 0, 0, 0], width: 0, color: [0, 0, 0, 0], rounding: "FixedRadius" };
         var radii = o.rounding === "HalfHeightRadius" ? [h / 2, h / 2, h / 2, h / 2] : o.radii, half = o.width / 2;
-        roundRect(half, half, w - o.width, h - o.width, radii);
-        ctx.fillStyle = css(tint); ctx.fill();
+        if (brush.resource) { // a rounded box with a picture: the picture, cut to the rounded shape
+          ctx.save();
+          roundRect(0, 0, w, h, radii); ctx.clip();
+          drawBrush({ draw: "Image", tint: brush.tint, size: brush.size, margin: brush.margin, resource: brush.resource, params: brush.params }, color, w, h);
+          ctx.restore();
+          roundRect(half, half, w - o.width, h - o.width, radii);
+        } else {
+          roundRect(half, half, w - o.width, h - o.width, radii);
+          ctx.fillStyle = css(tint); ctx.fill();
+        }
         if (o.width > 0 && o.color[3] > 0) { ctx.lineWidth = o.width; ctx.strokeStyle = css(mul(o.color, [1, 1, 1, color[3]])); ctx.stroke(); }
         return;
       }
       if (!brush.resource) { ctx.fillStyle = css(tint); ctx.fillRect(0, 0, w, h); return; }
       var asset = spec.assets[brush.resource] || {};
+      if (asset.kind === "material" && drawMaterial(brush.resource, tint, w, h, brush.params)) return;
       if (images[brush.resource] === "clear") return;
       var img = tinted(brush.resource, asset.kind === "material" ? [1, 1, 1, 1] : tint);
       ctx.save();
@@ -396,9 +517,14 @@
       var x = p.justify === "Center" ? w / 2 : p.justify === "Right" ? w - o : o;
       lines.forEach(function (line, i) {
         var y = o + lineH * (i + 0.5);
-        if (p.shadow_color[3] > 0) { ctx.fillStyle = css(p.shadow_color); ctx.fillText(line, x + p.shadow_offset[0], y + p.shadow_offset[1]); }
-        if (o > 0) { ctx.lineJoin = "round"; ctx.lineWidth = o * 2; ctx.strokeStyle = css(f.outline_color); ctx.strokeText(line, x, y); }
-        ctx.fillStyle = css(color); ctx.fillText(line, x, y);
+        ctx.save();
+        if (f.skew) ctx.transform(1, 0, -f.skew, 1, f.skew * y, 0); // Slate's font skew: the top leans right
+        var k = widthScale(f);
+        ctx.translate(x, 0); ctx.scale(k, 1); // widen around the anchor so alignment is kept
+        if (p.shadow_color[3] > 0) { ctx.fillStyle = css(p.shadow_color); ctx.fillText(line, p.shadow_offset[0] / k, y + p.shadow_offset[1]); }
+        if (o > 0) { ctx.lineJoin = "round"; ctx.lineWidth = o * 2; ctx.strokeStyle = css(f.outline_color); ctx.strokeText(line, 0, y); }
+        ctx.fillStyle = css(color); ctx.fillText(line, 0, y);
+        ctx.restore();
       });
     }
 
@@ -436,7 +562,7 @@
     }
 
     function paint(n, alpha) {
-      var vis = n.anim.visibility || n.visibility;
+      var vis = visibilityOf(n);
       if (vis === "Collapsed" || !n.rect) return;
       var r = n.rect, a = n.anim, x = n.xform;
       var t = [a.tx != null ? a.tx : x.t[0], a.ty != null ? a.ty : x.t[1]];
@@ -447,7 +573,7 @@
       ctx.save();
       ctx.translate(r.x, r.y);
       if (n.layoutScale !== 1) ctx.scale(n.layoutScale, n.layoutScale);
-      if (pressed === n && n.kind === "Button") { ctx.translate(r.w / 2, r.h / 2); ctx.scale(0.97, 0.97); ctx.translate(-r.w / 2, -r.h / 2); }
+      if (pressed === n && n.kind === "Button" && !n.children.length) { ctx.translate(r.w / 2, r.h / 2); ctx.scale(0.97, 0.97); ctx.translate(-r.w / 2, -r.h / 2); }
       var px = n.pivot[0] * r.w, py = n.pivot[1] * r.h;
       ctx.translate(px + t[0], py + t[1]);
       if (angle) ctx.rotate(angle * Math.PI / 180);
@@ -483,12 +609,28 @@
       ctx.restore();
     }
 
+    var showStats = false, frameTimes = [], frameGaps = [], lastFrameAt = 0, hoverAt = 0, hoverLatency = null;
+    function drawStats() {
+      var avg = function (a) { return a.length ? a.reduce(function (s, v) { return s + v; }, 0) / a.length : 0; };
+      var gap = avg(frameGaps), lines = [
+        "fps " + (gap ? Math.round(1000 / gap) : "-") + " · frame " + avg(frameTimes).toFixed(1) + " ms (max " + Math.max.apply(null, frameTimes.concat([0])).toFixed(1) + ")",
+        "hover -> first movement " + (hoverLatency == null ? "-" : hoverLatency.toFixed(0) + " ms"),
+        "canvas " + canvas.width + "x" + canvas.height + " · materials " + Object.keys(materials).length
+      ];
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.font = "12px ui-monospace, Consolas, monospace"; ctx.textAlign = "left"; ctx.textBaseline = "top";
+      ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.fillRect(4, 4, 330, 54);
+      ctx.fillStyle = "#9eff9e"; lines.forEach(function (l, i) { ctx.fillText(l, 10, 9 + i * 16); });
+    }
     function frame(now) {
       raf = 0;
       if (disposed) return;
-      if (playing) stepAnimation(now);
-      if (!dirty && !playing) return;
-      dirty = false;
+      var workStart = performance.now();
+      if (lastFrameAt) { frameGaps.push(now - lastFrameAt); if (frameGaps.length > 60) frameGaps.shift(); }
+      lastFrameAt = now;
+      if (anyPlaying()) stepPlayers(now);
+      if (!dirty && !anyPlaying() && !timeDrawn) return;
+      dirty = false; timeDrawn = false;
       var dpr = Math.min(window.devicePixelRatio || 1, 2), cw = canvas.clientWidth, ch = canvas.clientHeight;
       if (canvas.width !== Math.round(cw * dpr) || canvas.height !== Math.round(ch * dpr)) {
         canvas.width = Math.round(cw * dpr); canvas.height = Math.round(ch * dpr);
@@ -518,7 +660,103 @@
         ctx.lineWidth = 2 * dpr; ctx.setLineDash([6 * dpr, 4 * dpr]);
         ctx.strokeStyle = hint.hot ? "#ffffff" : "#7dd3fc"; ctx.stroke(); ctx.setLineDash([]);
       });
-      if (playing) raf = requestAnimationFrame(frame);
+      if (editMode && selected) {
+        var entry = null;
+        for (var pi = painted.length - 1; pi >= 0; pi--) if (painted[pi].node === selected) { entry = painted[pi]; break; }
+        if (entry) {
+          var corners = [[0, 0], [selected.rect.w, 0], [selected.rect.w, selected.rect.h], [0, selected.rect.h]]
+            .map(function (p) { return entry.matrix.transformPoint(new DOMPoint(p[0], p[1])); });
+          ctx.beginPath(); ctx.moveTo(corners[0].x, corners[0].y);
+          corners.slice(1).forEach(function (p) { ctx.lineTo(p.x, p.y); });
+          ctx.closePath(); ctx.lineWidth = 2 * dpr; ctx.strokeStyle = "#ffb020"; ctx.stroke();
+          ctx.fillStyle = "#ffb020";
+          corners.forEach(function (p) { ctx.fillRect(p.x - 3 * dpr, p.y - 3 * dpr, 6 * dpr, 6 * dpr); });
+        }
+      }
+      if (hoverAt && players.some(function (p) { return p.dir > 0 && p.time > p.anim.start; })) { hoverLatency = performance.now() - hoverAt; hoverAt = 0; }
+      frameTimes.push(performance.now() - workStart); if (frameTimes.length > 60) frameTimes.shift();
+      if (showStats) drawStats();
+      if (anyPlaying() || timeDrawn || showStats) raf = requestAnimationFrame(frame);
+      else lastFrameAt = 0;
+    }
+
+    // ---- editing --------------------------------------------------------
+    // Field ids match backend/preview/uasset/writer.py FIELDS.
+    function owner(n) { // a node that comes from another Widget Blueprint is edited through its instance
+      var top = n;
+      while (top && top.nested) top = top.parent;
+      return top;
+    }
+    function fieldsOf(n) {
+      var f = { opacity: n.opacity, translation: n.xform.t.slice(), scale: n.xform.s.slice(), angle: n.xform.angle };
+      if (n.kind === "TextBlock") { f.text = n.props.text; f.text_color = n.props.color.slice(); f.shadow_color = n.props.shadow_color.slice(); f.font_size = n.props.font.size; }
+      if (n.kind === "Image") { f.image_color = n.props.color.slice(); f.tint = n.props.brush.tint.slice(); f.image_size = n.props.brush.size.slice(); f.resource = n.props.brush.resource; }
+      if (n.slot.type === "canvas") { f.offsets = n.slot.offsets.slice(); f.alignment = n.slot.align.slice(); }
+      else if (n.slot.pad) f.padding = n.slot.pad.slice();
+      return f;
+    }
+    function describe(n) {
+      return { id: n.id, name: n.name, label: n.label, kind: n.kind, className: n["class"], slot: n.slot.type, fields: fieldsOf(n) };
+    }
+    function applyField(n, field, value) {
+      var p = n.props, side = field.indexOf(".") > 0 ? +field.split(".")[1] : -1;
+      if (field === "opacity") n.opacity = value;
+      else if (field === "translation") n.xform.t = value.slice();
+      else if (field === "scale") n.xform.s = value.slice();
+      else if (field === "angle") n.xform.angle = value;
+      else if (field === "text") p.text = value;
+      else if (field === "text_color" || field === "image_color") p.color = value.slice();
+      else if (field === "shadow_color") p.shadow_color = value.slice();
+      else if (field === "font_size") p.font.size = value;
+      else if (field === "tint") p.brush.tint = value.slice();
+      else if (field === "image_size") p.brush.size = value.slice();
+      else if (field === "resource") p.brush.resource = value;
+      else if (field === "alignment") n.slot.align = value.slice();
+      else if (field.indexOf("offsets.") === 0) n.slot.offsets[side] = value;
+      else if (field.indexOf("padding.") === 0) { if (!n.slot.pad) n.slot.pad = [0, 0, 0, 0]; n.slot.pad[side] = value; }
+      else return false;
+      tintCache = {}; invalidate();
+      return true;
+    }
+    function hitAny(clientX, clientY) { // edit mode: anything drawn can be picked, click-through or not
+      var b = canvas.getBoundingClientRect(), sx = canvas.width / b.width, sy = canvas.height / b.height;
+      var pt = new DOMPoint((clientX - b.left) * sx, (clientY - b.top) * sy);
+      for (var i = painted.length - 1; i >= 0; i--) {
+        var e = painted[i];
+        if (!hitTarget(e.node)) continue;
+        var local = e.matrix.inverse().transformPoint(pt);
+        if (local.x >= 0 && local.y >= 0 && local.x <= e.node.rect.w && local.y <= e.node.rect.h) return e.node;
+      }
+      return null;
+    }
+    function editDown(ev) {
+      var target = hitAny(ev.clientX, ev.clientY), node = target ? owner(target) : null;
+      selected = node;
+      emit("select", node ? describe(node) : {});
+      if (node) {
+        // one screen pixel in layout units (ignores rotation/scale of parents: good enough to drag)
+        var b = canvas.getBoundingClientRect(), fit = Math.min(b.width / viewport.w, b.height / viewport.h);
+        var unit = (layoutSize.w / viewport.w) / fit, canvasSlot = node.slot.type === "canvas";
+        drag = { node: node, x: ev.clientX, y: ev.clientY, unit: unit, canvasSlot: canvasSlot, moved: false,
+          start: canvasSlot ? node.slot.offsets.slice(0, 2) : node.xform.t.slice() };
+      }
+      invalidate();
+    }
+    function editMove(ev) {
+      if (!drag) { canvas.style.cursor = hitAny(ev.clientX, ev.clientY) ? "move" : "default"; return; }
+      var dx = (ev.clientX - drag.x) * drag.unit, dy = (ev.clientY - drag.y) * drag.unit;
+      if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 2) return;
+      drag.moved = true;
+      var x = Math.round(drag.start[0] + dx), y = Math.round(drag.start[1] + dy);
+      if (drag.canvasSlot) { drag.node.slot.offsets[0] = x; drag.node.slot.offsets[1] = y; } else drag.node.xform.t = [x, y];
+      invalidate();
+    }
+    function editUp() {
+      if (!drag) return;
+      var d = drag; drag = null;
+      if (!d.moved) return;
+      if (d.canvasSlot) emit("edit", { node: describe(d.node), changes: [["offsets.0", d.node.slot.offsets[0], d.start[0]], ["offsets.1", d.node.slot.offsets[1], d.start[1]]] });
+      else emit("edit", { node: describe(d.node), changes: [["translation", d.node.xform.t.slice(), d.start.slice()]] });
     }
 
     // ---- input ----------------------------------------------------------
@@ -544,32 +782,62 @@
       return null;
     }
     function onMove(ev) {
+      if (editMode) { editMove(ev); return; }
       var target = hit(ev.clientX, ev.clientY), button = target ? buttonOf(target) : null;
       canvas.style.cursor = button ? "pointer" : "default";
       if (button !== hovered) {
-        if (hovered) emit("unhover", { widget: hovered.name, label: hovered.label });
+        if (hovered) { emit("unhover", { widget: hovered.name, label: hovered.label }); fire(hovered, "unhover"); }
         hovered = button;
-        if (button) { emit("hover", { widget: button.name, label: button.label }); uiSound(button, "hovered"); }
+        if (button) { hoverAt = performance.now(); emit("hover", { widget: button.name, label: button.label }); uiSound(button, "hovered"); fire(button, "hover"); }
         invalidate();
       }
       emit("pointer", { widget: target ? target.name : "", label: target ? target.label : "", kind: target ? target.kind : "" });
     }
     function onDown(ev) {
       if (ev.button !== 0) return;
+      if (editMode) { editDown(ev); return; }
+      audioAllowed = true;
       resumeAudio();
       var target = hit(ev.clientX, ev.clientY);
       pressed = target ? buttonOf(target) : null;
-      if (pressed) { emit("press", { widget: pressed.name, label: pressed.label }); uiSound(pressed, "pressed"); invalidate(); }
+      if (pressed) { emit("press", { widget: pressed.name, label: pressed.label }); uiSound(pressed, "pressed"); fire(pressed, "press"); invalidate(); }
     }
     function onUp(ev) {
+      if (editMode) { editUp(); return; }
       if (!pressed) return;
       var target = hit(ev.clientX, ev.clientY), was = pressed;
       pressed = null;
       emit("release", { widget: was.name, label: was.label });
-      if (target && buttonOf(target) === was) emit("click", { widget: was.name, label: was.label, text: was.props.text || "" });
+      fire(was, "release");
+      if (target && buttonOf(target) === was) { emit("click", { widget: was.name, label: was.label, text: was.props.text || "" }); fire(was, "click"); }
       invalidate();
     }
-    function onLeave() { if (hovered || pressed) { hovered = null; pressed = null; invalidate(); } }
+    function onLeave() {
+      if (!hovered && !pressed) return;
+      if (hovered) fire(hovered, "unhover");
+      hovered = null; pressed = null; invalidate();
+    }
+
+    // ---- event bindings --------------------------------------------------
+    // What the blueprint itself binds to a button's events (read from the file, not guessed):
+    // play or reverse one of its animations, or call a function that lives in Verse.
+    var EVENT_KIND = { OnButtonHighlight: "hover", OnHovered: "hover", OnButtonUnhighlight: "unhover", OnUnhovered: "unhover",
+      OnButtonClicked: "click", OnClicked: "click", OnPressed: "press", OnReleased: "release" };
+    function fire(button, kind) {
+      var own = scopeOf(button);
+      run(own, function (ev) { return ev.widget === button.name && !ev.via; }, own.owner ? own.owner.label : button.label);
+      // the blueprint that contains this one may listen to the same button ("Card_1 -> Root_Button -> clicked")
+      if (own.owner) run(scopeOf(own.owner), function (ev) { return ev.widget === own.owner.name && ev.via === button.name; }, own.owner.label);
+      function run(scope, matches, who) { scope.events.forEach(function (ev) {
+        if (!matches(ev) || EVENT_KIND[ev.event] !== kind) return;
+        if (ev.action === "call") { emit("call", { widget: who, "function": ev["function"], event: ev.event }); return; }
+        var anim = scope.anims.filter(function (a) { return a.name === ev.animation; })[0];
+        if (!anim) return;
+        if (ev.action === "stop") { players = players.filter(function (p) { return !(p.scope === scope && p.anim === anim); }); invalidate(); return; }
+        startPlayer(scope, anim, { reverse: ev.action === "reverse", speed: ev.speed, loops: ev.loops });
+        emit("bound", { widget: who, animation: anim.name, action: ev.action, event: ev.event });
+      }); }
+    }
     canvas.addEventListener("pointermove", onMove);
     canvas.addEventListener("pointerdown", onDown);
     window.addEventListener("pointerup", onUp);
@@ -578,7 +846,12 @@
     resizeObserver.observe(canvas);
 
     // ---- audio ----------------------------------------------------------
+    /* The browser's audio system is started on a click only. Creating it blocks the page for tens
+     * of milliseconds (it opens the sound device), which made the first frame of a hover animation
+     * jump; and a browser keeps audio silent until a click anyway. */
+    var audioAllowed = false;
     function resumeAudio() {
+      if (!audioAllowed) return null;
       if (!audio) { try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audio = null; } }
       if (audio && audio.state === "suspended") audio.resume();
       return audio;
@@ -620,10 +893,9 @@
 
     // ---- animation ------------------------------------------------------
     function clearAnim() { allNodes.forEach(function (n) { n.anim = {}; }); }
-    function applyAnimation(anim, t) {
-      clearAnim();
+    function applyTracks(scope, anim, t) {
       anim.tracks.forEach(function (tr) {
-        var n = tr.root ? spec.root : nodesByName[tr.slot_of || tr.widget];
+        var n = tr.root ? scope.top : scope.byName[tr.slot_of || tr.widget];
         if (!n) return;
         var time = Math.max(tr.start, tr.end == null ? t : Math.min(t, tr.end)), c = tr.channels, v;
         if (tr.kind === "transform") {
@@ -643,27 +915,59 @@
         }
       });
     }
-    function stopSources() { if (playing) playing.sources.forEach(function (s) { try { s.stop(); } catch (e) {} }); }
-    function startAudio(state) {
-      state.anim.audio.forEach(function (a) {
-        if (a.end > state.time || !a.end) {
-          playSound(a.sound, { volume: a.volume, pitch: a.pitch, loop: a.loop, offset: state.time - a.start })
-            .then(function (src) { if (src && playing === state) state.sources.push(src); else if (src) src.stop(); });
+    function applyPlayers() { // every running or held animation, oldest first
+      clearAnim();
+      players.forEach(function (p) { applyTracks(p.scope, p.anim, p.time); });
+      dirty = true;
+    }
+    function stopSources(p) { p.sources.forEach(function (s) { try { s.stop(); } catch (e) {} }); p.sources = []; }
+    function startAudio(p) {
+      if (p.dir < 0) return;
+      p.anim.audio.forEach(function (a) {
+        if (a.end > p.time || !a.end) {
+          playSound(a.sound, { volume: a.volume, pitch: a.pitch, loop: a.loop, offset: p.time - a.start })
+            .then(function (src) { if (src && players.indexOf(p) >= 0) p.sources.push(src); else if (src) src.stop(); });
         }
       });
     }
-    function stepAnimation(now) {
-      var s = playing, dt = s.last ? (now - s.last) / 1000 : 0;
-      s.last = now;
-      if (!s.paused) s.time += dt * s.speed;
-      var end = s.anim.end;
-      if (s.time >= end) {
-        if (s.loop && end > s.anim.start) { s.time = s.anim.start; stopSources(); s.sources = []; startAudio(s); }
-        else { s.time = end; applyAnimation(s.anim, end); emit("animation", { name: s.anim.name, time: end, state: "finished" }); stopSources(); playing = null; dirty = true; return; }
-      }
-      applyAnimation(s.anim, s.time);
-      emit("animation", { name: s.anim.name, time: s.time, state: "playing" });
-      dirty = true;
+    function removePlayers(test) {
+      players = players.filter(function (p) { if (test(p)) { stopSources(p); return false; } return true; });
+    }
+    /* Forward: from the start, or from where a reverse run of the same animation is. Reverse: from where
+     * it is, or from the end. A finished forward run holds its last frame, as UMG does; a finished
+     * reverse run is back at the start and lets go. */
+    function startPlayer(scope, anim, opts) {
+      opts = opts || {};
+      var p = players.filter(function (x) { return x.scope === scope && x.anim === anim; })[0];
+      if (!p) {
+        p = { scope: scope, anim: anim, time: opts.reverse ? anim.end : anim.start, sources: [] };
+        players.push(p);
+      } else if (!opts.reverse && !(p.state === "playing" && p.dir < 0)) p.time = anim.start;
+      stopSources(p);
+      if (opts.from != null) p.time = opts.from;
+      p.dir = opts.reverse ? -1 : 1; p.speed = opts.speed > 0 ? opts.speed : 1; p.loop = !!opts.loop;
+      p.manual = !!opts.manual; p.state = "playing"; p.last = performance.now();
+      if (opts.manual) audioAllowed = true; // a Play button press is a click
+      if (p.anim.audio.length) { resumeAudio(); startAudio(p); }
+      invalidate();
+      return p;
+    }
+    function stepPlayers(now) {
+      players.slice().forEach(function (p) {
+        if (p.state !== "playing") return;
+        var dt = p.last ? Math.max(0, now - p.last) / 1000 : 0;
+        p.last = now;
+        p.time += dt * p.speed * p.dir;
+        if (p.dir > 0 && p.time >= p.anim.end) {
+          if (p.loop && p.anim.end > p.anim.start) { p.time = p.anim.start; stopSources(p); startAudio(p); }
+          else { p.time = p.anim.end; p.state = "held"; stopSources(p); if (p.manual) emit("animation", { name: p.anim.name, time: p.time, state: "finished" }); return; }
+        } else if (p.dir < 0 && p.time <= p.anim.start) {
+          removePlayers(function (x) { return x === p; });
+          return;
+        }
+        if (p.manual) emit("animation", { name: p.anim.name, time: p.time, state: "playing" });
+      });
+      applyPlayers();
     }
 
     var api = {
@@ -671,7 +975,36 @@
       on: function (fn) { listeners.push(fn); },
       setViewport: function (w, h) { viewport = { w: w, h: h }; invalidate(); },
       setHints: function (on) { showHints = !!on; invalidate(); },
-      setMuted: function (on) { muted = !!on; if (muted) stopSources(); },
+      toggleStats: function () { showStats = !showStats; frameTimes = []; frameGaps = []; invalidate(); return showStats; },
+      setDesignTime: function (on) { designTime = !!on; invalidate(); },
+      setEditMode: function (on) { editMode = !!on; drag = null; hovered = null; pressed = null; if (!on) selected = null; canvas.style.cursor = "default"; invalidate(); },
+      selection: function () { return selected ? describe(selected) : null; },
+      describeNode: function (id) { var n = allNodes.filter(function (x) { return x.id === id; })[0]; return n ? describe(n) : null; },
+      select: function (id) {
+        var n = allNodes.filter(function (x) { return x.id === id; })[0];
+        selected = n && !n.nested ? n : null;
+        emit("select", selected ? describe(selected) : {});
+        invalidate();
+      },
+      tree: function () { // this Widget Blueprint's own widgets, in hierarchy order (nested blueprints stay closed)
+        var out = [];
+        (function walk(n, depth) {
+          if (!n || n.nested) return;
+          out.push({ id: n.id, label: n.label, kind: n.kind, depth: depth,
+            hidden: (n.visibility === "Collapsed" || n.visibility === "Hidden") });
+          n.children.forEach(function (c) { walk(c, depth + 1); });
+        })(spec.root, 0);
+        return out;
+      },
+      setField: function (id, field, value) {
+        var n = allNodes.filter(function (x) { return x.id === id; })[0];
+        return n ? applyField(n, field, value) : false;
+      },
+      images: function () { // pictures this widget already references (what an image can be swapped to)
+        return Object.keys(spec.assets || {}).filter(function (k) { var a = spec.assets[k]; return a.kind === "texture" || a.kind === "material"; })
+          .map(function (k) { return { key: k, name: spec.assets[k].name, kind: spec.assets[k].kind }; });
+      },
+      setMuted: function (on) { muted = !!on; if (muted) players.forEach(stopSources); },
       switchers: function () {
         return allNodes.filter(function (n) { return n.kind === "WidgetSwitcher" && !n.nested; })
           .map(function (n) { return { id: n.id, label: n.label, active: n.props.active, count: n.children.length }; });
@@ -686,24 +1019,25 @@
         var anim = (spec.animations || []).filter(function (a) { return a.name === name; })[0];
         if (!anim) return false;
         opts = opts || {};
-        stopSources();
-        playing = { anim: anim, time: opts.from == null ? anim.start : opts.from, loop: !!opts.loop, speed: opts.speed || 1, last: 0, sources: [], paused: false };
-        resumeAudio(); startAudio(playing);
-        emit("animation", { name: name, time: playing.time, state: "started" });
-        invalidate();
+        removePlayers(function (p) { return p.manual; });
+        var player = startPlayer(rootScope, anim, { from: opts.from == null ? anim.start : opts.from, loop: opts.loop, speed: opts.speed, manual: true });
+        emit("animation", { name: name, time: player.time, state: "started" });
         return true;
       },
       seek: function (name, time) {
         var anim = (spec.animations || []).filter(function (a) { return a.name === name; })[0];
         if (!anim) return;
-        stopSources(); playing = null; applyAnimation(anim, time); invalidate();
+        removePlayers(function (p) { return p.manual; });
+        players.push({ scope: rootScope, anim: anim, time: time, dir: 1, speed: 1, loop: false, state: "held", last: 0, sources: [], manual: true });
+        applyPlayers(); invalidate();
       },
-      stop: function () { stopSources(); playing = null; clearAnim(); emit("animation", { state: "stopped" }); invalidate(); },
+      stop: function () { removePlayers(function () { return true; }); clearAnim(); emit("animation", { state: "stopped" }); invalidate(); },
+      materialReport: function () { return { shaders: Object.keys(materials).length, failed: materialErrors.slice() }; },
       missingMedia: function () {
         return Object.keys(spec.assets || {}).filter(function (k) { return !spec.assets[k].url; }).map(function (k) { return spec.assets[k]; });
       },
       dispose: function () {
-        disposed = true; stopSources(); resizeObserver.disconnect();
+        disposed = true; removePlayers(function () { return true; }); resizeObserver.disconnect();
         canvas.removeEventListener("pointermove", onMove); canvas.removeEventListener("pointerdown", onDown);
         window.removeEventListener("pointerup", onUp); canvas.removeEventListener("pointerleave", onLeave);
         if (audio) audio.close();

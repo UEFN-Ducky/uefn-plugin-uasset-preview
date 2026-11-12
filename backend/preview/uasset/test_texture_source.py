@@ -24,7 +24,7 @@ def _source(monkeypatch, data, width, height, compression="TSCF_UEDELTA", **extr
     (1024, 1024, [(0, 1024, 32)]),
     (1200, 662, [(0, 608, 56), (608, 1200, 61)]),
 ])
-def test_delta_tile_boundaries_and_rgba(monkeypatch, width, height, tiles):
+def test_delta_tile_boundaries_and_bgra(monkeypatch, width, height, tiles):
     # Tile boundaries observed in independently authored UEFN textures. Each
     # subsequent row is a difference; restarting at the wrong row corrupts it.
     raw = bytearray(width * height * 4)
@@ -35,7 +35,8 @@ def test_delta_tile_boundaries_and_rgba(monkeypatch, width, height, tiles):
             delta = pixel if y % rows == 0 else bytes([3, 7, 11, 13])
             start, end = (y * width + x0) * 4, (y * width + x1) * 4
             raw[start:end] = delta * (x1 - x0)
-            expected[start:end] = pixel * (x1 - x0)
+            # stored blue-green-red-alpha, shown red-green-blue-alpha
+            expected[start:end] = bytes((pixel[2], pixel[1], pixel[0], pixel[3])) * (x1 - x0)
     png = payload.texture_png(_source(monkeypatch, bytes(raw), width, height))
     assert png is not None
     img = Image.open(io.BytesIO(png)).convert("RGBA")

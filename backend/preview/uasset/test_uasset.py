@@ -106,3 +106,14 @@ def test_real_widget_blueprint_builds_a_spec():
     spec = build_umg_spec(file, project_resolver(content))
     assert spec["root"] and spec["root"]["kind"]
     assert spec["name"] == file.stem
+
+
+@pytest.mark.skipif(not os.environ.get("DUCKY_TEST_WIDGET"), reason="set DUCKY_TEST_WIDGET to a widget .uasset")
+def test_event_bindings_name_a_widget_an_event_and_what_they_do():
+    from .package import load_package
+    from .umg_spec import _events
+
+    events = _events(load_package(os.environ["DUCKY_TEST_WIDGET"]))
+    for event in events:
+        assert event["event"] and event["action"] in ("play", "reverse", "stop", "call")
+        assert event.get("animation") or event.get("function")

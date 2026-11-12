@@ -43,6 +43,7 @@ _SLOT_DEFAULTS = {
     "ButtonSlot": ("Center", "Center", [4, 2, 4, 2]),
     "BorderSlot": ("Fill", "Fill", [4, 2, 4, 2]),
     "WidgetSwitcherSlot": ("Fill", "Fill", [0, 0, 0, 0]),
+    "UniformGridSlot": ("Left", "Top", [0, 0, 0, 0]),
 }
 
 
@@ -153,8 +154,10 @@ class _Builder:
         outline = value.get("OutlineSettings") if isinstance(value.get("OutlineSettings"), dict) else {}
         family = self.asset(pkg, value.get("FontObject"))
         return {
-            "family": self.assets[family]["name"] if family else "",
-            "typeface": str(value.get("TypefaceFontName") or ("Bold" if variant != "uefn" else "")),
+            # UEFN's text block defaults (read from UEFN itself): Burbank Small, Black
+            "family": self.assets[family]["name"] if family else ("BurbankSmall" if variant == "uefn" else ""),
+            "typeface": str(value.get("TypefaceFontName") or ("Black" if variant == "uefn" else "Bold")),
+            "skew": float(value.get("SkewAmount") or 0),
             "size": float(value.get("Size") or 24),
             "letter_spacing": float(value.get("LetterSpacing") or 0),
             "outline_size": float(outline.get("OutlineSize") or 0),
@@ -188,6 +191,8 @@ class _Builder:
             "pad": _margin(props.get("Padding"), pad),
             "fill": _enum(size.get("SizeRule"), "Automatic") == "Fill",
             "fill_value": float(size.get("Value", 1.0)),
+            "row": int(props.get("Row") or 0),
+            "column": int(props.get("Column") or 0),
         }
 
     # -- tree --------------------------------------------------------------
@@ -213,6 +218,7 @@ class _Builder:
             "opacity": float(props.get("RenderOpacity", 1.0)),
             "enabled": props.get("bIsEnabled", True) is not False,
             "clip": _enum(props.get("Clipping"), "Inherit") not in ("Inherit", ""),
+            "design_hidden": bool(props.get("bHiddenInDesigner")),
             "xform": {
                 "t": _vec2(transform.get("Translation"), (0, 0)),
                 "s": _vec2(transform.get("Scale"), (1, 1)),
@@ -275,6 +281,10 @@ class _Builder:
             p.update(stretch=_enum(props.get("Stretch"), "ScaleToFit"),
                      direction=_enum(props.get("StretchDirection"), "Both"),
                      user_scale=float(props.get("UserSpecifiedScale", 1.0)))
+        elif kind == "UniformGridPanel":
+            p.update(slot_padding=_margin(props.get("SlotPadding")),
+                     min_slot_width=float(props.get("MinDesiredSlotWidth") or 0),
+                     min_slot_height=float(props.get("MinDesiredSlotHeight") or 0))
         elif kind == "WidgetSwitcher":
             p["active"] = int(props.get("ActiveWidgetIndex") or 0)
         elif kind == "ProgressBar":
@@ -332,6 +342,10 @@ class _Builder:
         root = self.widget(sub, tree, depth + 1, _binding_overrides(sub, props))
         root["slot"] = {"type": "root"}
         node["children"].append(root)
+        # the nested blueprint brings its own animations and the events that play them
+        if blueprint is not None:
+            node["anims"] = _animations(self, sub, blueprint)
+            node["events"] = _events(sub)
         if _enum(design.get("DesignSizeMode")) in ("Custom", "CustomOnScreen") and design.get("DesignTimeSize"):
             node["props"]["design_size"] = _vec2(design.get("DesignTimeSize"), (0, 0))
 
@@ -383,6 +397,59 @@ def _binding_overrides(pkg: Package, instance_props: dict[str, Any]) -> dict[str
                 continue
             if source in values and not isinstance(values[source], (Raw, Ref)):
                 out.setdefault(widget, {})[prop] = values[source]
+    return out
+
+
+_PLAY = {"QueuePlayAnimation": "play", "PlayAnimation": "play", "QueuePlayAnimationForward": "play",
+         "PlayAnimationForward": "play", "QueuePlayAnimationReverse": "reverse", "PlayAnimationReverse": "reverse",
+         "QueueStopAnimation": "stop", "StopAnimation": "stop"}
+
+
+def _events(pkg: Package) -> list[dict[str, Any]]:
+    """View event bindings: ``widget.event -> play/reverse an animation`` or a call into Verse.
+
+    These are data in the Widget Blueprint (no graph to run), so the preview can honour
+    them: hovering a card plays the animation its own blueprint binds to the hover.
+    """
+    out: list[dict[str, Any]] = []
+    for exp in pkg.exports:
+        if pkg.class_name(exp) != "MVVMBlueprintViewEvent":
+            continue
+        props = export_properties(pkg, exp)
+        try:
+            source = props["EventPath"]
+            # ``Card_1 -> Root_Button -> OnButtonClicked``: the event of a widget inside a nested blueprint
+            steps = [step["BindingReference"]["MemberName"] for step in source["Paths"]]
+            event, via = steps[-1], (str(steps[-2]) if len(steps) > 1 else "")
+            function = props["DestinationPath"]["Paths"][0]["BindingReference"]["MemberName"]
+        except (KeyError, IndexError, TypeError):
+            continue
+        widget = str(source.get("WidgetName") or "")
+        entry: dict[str, Any] = {"widget": "" if widget == "None" else widget, "event": str(event), "via": via}
+        action = _PLAY.get(str(function))
+        if action is None:
+            entry.update(action="call", function=str(function))
+            out.append(entry)
+            continue
+        entry["action"] = action
+        for pin in props.get("SavedPins") or []:
+            if not isinstance(pin, dict):
+                continue
+            names = (pin.get("Id") or {}).get("PinNames") or []
+            name = str(names[0]) if names else ""
+            default = str(pin.get("DefaultString") or "")
+            if name == "InAnimation":
+                try:
+                    entry["animation"] = str(pin["Path"]["Paths"][0]["BindingReference"]["MemberName"])
+                except (KeyError, IndexError, TypeError):
+                    pass
+            elif name in ("PlaybackSpeed", "NumLoopsToPlay", "StartAtTime") and default:
+                try:
+                    entry[{"PlaybackSpeed": "speed", "NumLoopsToPlay": "loops", "StartAtTime": "start"}[name]] = float(default)
+                except ValueError:
+                    pass
+        if entry.get("animation"):
+            out.append(entry)
     return out
 
 
@@ -497,6 +564,29 @@ def _animations(builder: _Builder, pkg: Package, blueprint: Export) -> list[dict
     return out
 
 
+def _materials(builder: _Builder) -> dict[str, Any]:
+    """Node graph of every UI material the widget uses, keyed like ``assets``."""
+    from .material import material_graph
+
+    out: dict[str, Any] = {}
+    for key, asset in list(builder.assets.items()):
+        if asset["kind"] != "material" or not asset.get("file"):
+            continue
+        try:
+            graph = material_graph(asset["file"], builder.resolve)
+        except (ReadError, OSError, KeyError, IndexError, TypeError):
+            graph = None
+        if graph is None:
+            continue
+        for path, cls in graph.pop("textures").items():
+            if path not in builder.assets:
+                file = builder.resolve(path)
+                builder.assets[path] = {"kind": "texture", "class": cls, "name": path.rsplit(".", 1)[-1],
+                                        "file": str(file) if file else ""}
+        out[key] = graph
+    return out
+
+
 def build_umg_spec(path: Path | str, resolve: Callable[[str], Optional[Path]]) -> dict[str, Any]:
     """Spec for the Widget Blueprint at ``path``.
 
@@ -517,14 +607,17 @@ def build_umg_spec(path: Path | str, resolve: Callable[[str], Optional[Path]]) -
     custom = _enum(defaults.get("DesignSizeMode")) in ("Custom", "CustomOnScreen") and defaults.get("DesignTimeSize")
     if custom:
         design = _vec2(defaults.get("DesignTimeSize"), (1920, 1080))
+    animations = _animations(builder, pkg, blueprint)
     return {
         "version": 1,
+        "materials": _materials(builder),
         "name": blueprint.object_name,
         "package": pkg.package_name,
         "design_size": design,
         "custom_size": bool(custom),
         "root": root,
-        "animations": _animations(builder, pkg, blueprint),
+        "animations": animations,
+        "events": _events(pkg),
         "assets": builder.assets,
         "warnings": builder.warnings,
     }

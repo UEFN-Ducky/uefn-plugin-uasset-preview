@@ -37,6 +37,37 @@
     .anim .dur { color: var(--muted); font-variant-numeric: tabular-nums; }
     .anim button { padding: 1px 6px; }
     #scrub { width: calc(100% - 20px); margin: 2px 10px 6px; }
+    .insp { padding: 0 10px 8px; overflow: auto; }
+    .insp .who { font-weight: 600; margin-bottom: 2px; word-break: break-all; }
+    .insp .cls { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+    .insp label { display: block; color: var(--muted); font-size: 11px; margin-top: 6px; }
+    .insp .row { display: flex; gap: 4px; align-items: center; }
+    .insp input[type=number], .insp input[type=text], .insp textarea, .insp select { width: 100%; min-width: 0; background: #1a1a1e; color: var(--text);
+      border: 1px solid var(--border); border-radius: 5px; padding: 3px 5px; font: inherit; }
+    .insp textarea { resize: vertical; min-height: 44px; }
+    .insp input[type=color] { width: 34px; height: 24px; padding: 0; border: 1px solid var(--border); border-radius: 5px; background: none; flex: none; }
+    .insp input[type=range] { flex: 1; min-width: 0; }
+    .insp .note { color: var(--muted); font-size: 11px; margin-top: 6px; }
+    .savebar { display: flex; gap: 6px; padding: 6px 10px; border-top: 1px solid var(--border); align-items: center; }
+    .savebar[hidden], .savebar button[hidden] { display: none; }
+    /* Shown small (the chat's hover card): only the widget itself. */
+    @media (max-width: 560px) and (max-height: 420px) {
+      .bar, .side, .hover, .banner { display: none !important; }
+      .main { flex-direction: row; }
+    }
+    .tree { max-height: 32%; overflow: auto; padding: 0 6px 6px; font-size: 12px; }
+    .tree div { padding: 1px 4px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+    .tree div:hover { background: #2a2a31; }
+    .tree div.sel { background: #3a2f12; color: #ffcf6b; }
+    .tree div.off { color: var(--muted); }
+    .tree .k { color: var(--muted); font-size: 10px; margin-left: 4px; }
+    .side.editing { width: 300px; }
+    .side.editing .play-only { display: none; }
+    .side.editing .insp { flex: 1; min-height: 0; }
+    .side.editing #log { flex: none; height: 70px; }
+    .savebar .count { flex: 1; color: var(--muted); font-size: 11px; }
+    button.primary { border-color: var(--accent); color: var(--accent); }
+    button:disabled { opacity: .45; cursor: default; }
     #log { flex: 1; min-height: 60px; margin: 0; padding: 4px 10px 8px; overflow: auto;
       font: 11px/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; color: #c9d1e6; }
     .empty { color: var(--muted); padding: 2px 10px 8px; }
@@ -58,6 +89,7 @@
     </select>
     <button type="button" id="btn-hints" title="Outline every clickable button">Show buttons</button>
     <button type="button" id="btn-mute">Mute</button>
+    <button type="button" id="btn-edit" title="Select, move and change widgets, then save into the .uasset">Edit</button>
     <span class="grow"></span>
     <button type="button" id="btn-reload">Reload</button>
     <button type="button" id="btn-details">Asset details</button>
@@ -67,17 +99,29 @@
   <div class="main">
     <div class="stage"><canvas id="stage"></canvas></div>
     <div class="side">
-      <h2>Animations</h2>
-      <div class="list" id="anims"></div>
+      <h2 class="play-only">Animations</h2>
+      <div class="list play-only" id="anims"></div>
       <input type="range" id="scrub" min="0" max="1000" value="0" hidden />
       <h2 id="pages-title" hidden>Pages (widget switchers)</h2>
       <div class="list" id="pages" hidden></div>
+      <h2 id="tree-title" hidden>Hierarchy</h2>
+      <div class="tree" id="tree" hidden></div>
+      <h2 id="insp-title" hidden>Selected widget</h2>
+      <div class="insp" id="insp" hidden></div>
+      <div class="savebar" id="savebar" hidden>
+        <span class="count" id="pending">No changes</span>
+        <button type="button" id="btn-undo-save" title="Put back the file as it was before the last save" hidden>Undo save</button>
+        <button type="button" id="btn-discard" disabled>Discard</button>
+        <button type="button" id="btn-save" class="primary" disabled>Save</button>
+        <button type="button" id="btn-save-uefn" class="primary" hidden title="UEFN saves its own version of this widget first, then these changes are applied on top">Save in UEFN, then apply</button>
+      </div>
       <h2>Events</h2>
       <pre id="log"></pre>
     </div>
   </div>
   <div class="hover" id="hover">Move the mouse over the widget; click its buttons.</div>
 </div>
+<script src="umg/material.js"></script>
 <script src="umg/engine.js"></script>
 <script>
 (function () {
@@ -177,6 +221,8 @@
     var text = parts.join(" · ");
     if (text) text += ". Supported textures use their original resolution; material effects may still use thumbnails.";
     if (!res.oodle_available && !res.listener_online && (m.images_thumbnail || m.sounds_missing)) text += " Offline media decoding is unavailable in this Python environment.";
+    var report = engine && engine.materialReport ? engine.materialReport() : { failed: [] };
+    report.failed.forEach(function (f) { text += (text ? " " : "") + "Material " + f.name + " is shown from its thumbnail (" + f.error + ")."; });
     (res.spec.warnings || []).forEach(function (w) { text += (text ? " " : "") + w; });
     $("banner").hidden = !text; $("banner").textContent = text;
   }
@@ -193,6 +239,13 @@
     engine.on(function (type, d) {
       if (type === "click") log("CLICK  " + d.label + (d.text ? '  "' + d.text + '"' : ""));
       else if (type === "hover") log("hover  " + d.label);
+      else if (type === "call") log("  -> " + d["function"] + "  (Verse, not run here)  [" + d.widget + "]");
+      else if (type === "bound" && d.event.indexOf("Click") >= 0) log("  plays " + d.animation + "  [" + d.widget + "]");
+      else if (type === "select") { renderInspector(d.id ? d : null); markTree(d.id || 0); }
+      else if (type === "edit") {
+        d.changes.forEach(function (c) { undoStack.push({ id: d.node.id, field: c[0], before: c[2], group: undoGroup }); record(d.node, c[0], c[1]); });
+        undoGroup++; renderInspector(engine.selection());
+      }
       else if (type === "pointer") $("hover").textContent = d.widget ? d.kind + "  " + d.label + (d.label !== d.widget ? "  (" + d.widget + ")" : "") : "—";
       else if (type === "animation" && scrubAnim && d.time != null) {
         var span = scrubAnim.end - scrubAnim.start;
@@ -204,6 +257,9 @@
     renderPages();
     mediaBanner(res);
     window.__umg = engine;
+    engine.setEditMode($("btn-edit").classList.contains("on"));
+    engine.setDesignTime($("btn-edit").classList.contains("on")); // editing shows everything, as UEFN's designer does
+    renderInspector(null); refreshSaveBar(); renderTree(); undoStack = []; originals = {};
   }
 
   function applyRes() {
@@ -235,6 +291,212 @@
   $("res").onchange = applyRes;
   $("btn-hints").onclick = function () { this.classList.toggle("on"); if (engine) engine.setHints(this.classList.contains("on")); };
   $("btn-mute").onclick = function () { this.classList.toggle("on"); if (engine) engine.setMuted(this.classList.contains("on")); };
+  // ---- editing -----------------------------------------------------------
+  // pending: "widget|field" -> {widget, kind, field, value}; the last value of a field wins.
+  var pending = {};
+  function toHex(c) { // linear colour -> #rrggbb as shown on screen
+    var ch = function (v) { v = Math.min(1, Math.max(0, v)); v = v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055; return ("0" + Math.round(v * 255).toString(16)).slice(-2); };
+    return "#" + ch(c[0]) + ch(c[1]) + ch(c[2]);
+  }
+  function fromHex(hex, alpha) {
+    var ch = function (i) { var v = parseInt(hex.substr(i, 2), 16) / 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    return [ch(1), ch(3), ch(5), alpha];
+  }
+  function record(node, field, value) {
+    var key = node.name + "|" + field, entry = undoStack[undoStack.length - 1];
+    if (!(key in originals) && entry && entry.field === field) originals[key] = entry.before;
+    pending[key] = { widget: node.name, kind: node.kind, field: field, value: value };
+    refreshSaveBar();
+  }
+  // undo: one entry per changed field, with the value it had; entries of one gesture share a group
+  var undoStack = [], undoGroup = 1, originals = {};
+  function valueOf(desc, field) {
+    var parts = field.split("."), v = desc.fields[parts[0]];
+    v = parts.length > 1 ? v[+parts[1]] : v;
+    return Array.isArray(v) ? v.slice() : v;
+  }
+  function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+  function change(node, field, value) {
+    var before = valueOf(engine.describeNode(node.id), field), last = undoStack[undoStack.length - 1];
+    if (!engine.setField(node.id, field, value)) return;
+    // typing or dragging a slider keeps refining the same entry instead of adding one per keystroke
+    if (!(last && last.id === node.id && last.field === field && last.live)) undoStack.push({ id: node.id, field: field, before: before, group: undoGroup++, live: true });
+    record(node, field, value);
+  }
+  function undo() {
+    if (!undoStack.length) return;
+    var group = undoStack[undoStack.length - 1].group;
+    while (undoStack.length && undoStack[undoStack.length - 1].group === group) {
+      var u = undoStack.pop(), desc = engine.describeNode(u.id);
+      engine.setField(u.id, u.field, u.before);
+      var key = desc.name + "|" + u.field;
+      if (key in originals && same(originals[key], u.before)) delete pending[key];
+      else pending[key] = { widget: desc.name, kind: desc.kind, field: u.field, value: u.before };
+    }
+    refreshSaveBar(); renderInspector(engine.selection());
+  }
+  function renderTree() {
+    var host = $("tree"), editing = $("btn-edit").classList.contains("on");
+    host.hidden = $("tree-title").hidden = !editing; host.innerHTML = "";
+    if (!editing || !engine) return;
+    engine.tree().forEach(function (n) {
+      var row = el("div", { text: n.label, title: n.label + " (" + n.kind + ")" }, host);
+      row.style.paddingLeft = (4 + n.depth * 10) + "px"; row.dataset.id = n.id;
+      if (n.hidden) row.className = "off";
+      el("span", { className: "k", text: n.kind }, row);
+      row.onclick = function () { engine.select(n.id); };
+    });
+  }
+  function markTree(id) {
+    Array.prototype.forEach.call(document.querySelectorAll("#tree div"), function (row) {
+      var on = +row.dataset.id === id; row.classList.toggle("sel", on);
+      if (on) row.scrollIntoView({ block: "nearest" });
+    });
+  }
+  window.addEventListener("keydown", function (ev) {
+    if (engine && ev.shiftKey && (ev.key === "F" || ev.key === "f") && !/^(INPUT|TEXTAREA|SELECT)$/.test((ev.target && ev.target.tagName) || "")) {
+      engine.toggleStats(); return; // performance overlay
+    }
+    if (!engine || !$("btn-edit").classList.contains("on")) return;
+    var typing = /^(INPUT|TEXTAREA|SELECT)$/.test((ev.target && ev.target.tagName) || "");
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "z" && !typing) { ev.preventDefault(); undo(); return; }
+    var move = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[ev.key], sel = engine.selection();
+    if (!move || typing || !sel) return;
+    ev.preventDefault();
+    var step = ev.shiftKey ? 10 : 1;
+    if (sel.fields.offsets) {
+      if (move[0]) change(sel, "offsets.0", sel.fields.offsets[0] + move[0] * step);
+      if (move[1]) change(sel, "offsets.1", sel.fields.offsets[1] + move[1] * step);
+    } else change(sel, "translation", [sel.fields.translation[0] + move[0] * step, sel.fields.translation[1] + move[1] * step]);
+    undoStack[undoStack.length - 1].live = false;
+    renderInspector(engine.selection());
+  });
+  function refreshSaveBar() {
+    var n = Object.keys(pending).length, editing = $("btn-edit").classList.contains("on");
+    $("savebar").hidden = !editing;
+    $("pending").textContent = n ? n + " unsaved change" + (n > 1 ? "s" : "") : "No changes";
+    $("btn-save").disabled = !n || !!window.__offlineDemo; $("btn-discard").disabled = !n;
+    if (window.__offlineDemo && n) $("pending").textContent += " (this example page cannot save)";
+  }
+  function el(tag, attrs, parent) {
+    var e = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (k) { if (k === "text") e.textContent = attrs[k]; else e[k] = attrs[k]; });
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function numberRow(host, label, values, step, onChange) {
+    el("label", { text: label }, host);
+    var row = el("div", { className: "row" }, host);
+    values.forEach(function (v, i) {
+      var input = el("input", { type: "number", step: step, value: Math.round(v * 1000) / 1000 }, row);
+      input.onchange = function () { var x = parseFloat(input.value); if (isFinite(x)) onChange(i, x); };
+    });
+  }
+  function colorRow(host, label, color, onChange) {
+    el("label", { text: label }, host);
+    var row = el("div", { className: "row" }, host);
+    var pick = el("input", { type: "color", value: toHex(color) }, row);
+    var alpha = el("input", { type: "range", min: 0, max: 1, step: 0.01, value: color[3], title: "Opacity" }, row);
+    var send = function () { onChange(fromHex(pick.value, parseFloat(alpha.value))); };
+    pick.oninput = send; alpha.oninput = send;
+  }
+  function renderInspector(node) {
+    var host = $("insp"), editing = $("btn-edit").classList.contains("on");
+    host.innerHTML = ""; host.hidden = $("insp-title").hidden = !editing;
+    if (!editing) return;
+    if (undoStack.length) undoStack[undoStack.length - 1].live = false; // a new selection starts a new undo step
+    if (!node) { el("div", { className: "note", text: "Click a widget in the preview or in the hierarchy. Drag to move, arrow keys to nudge (Shift: 10), Ctrl+Z to undo." }, host); return; }
+    var f = node.fields;
+    el("div", { className: "who", text: node.label }, host);
+    el("div", { className: "cls", text: node.kind + (node.className !== node.kind ? " · " + node.className : "") }, host);
+    if (f.text != null) {
+      el("label", { text: "Text" }, host);
+      var area = el("textarea", { value: f.text }, host);
+      area.oninput = function () { change(node, "text", area.value); };
+      numberRow(host, "Font size", [f.font_size], 1, function (i, v) { change(node, "font_size", v); });
+      colorRow(host, "Text colour", f.text_color, function (c) { change(node, "text_color", c); });
+      colorRow(host, "Shadow colour", f.shadow_color, function (c) { change(node, "shadow_color", c); });
+    }
+    if (f.tint) {
+      el("label", { text: "Image" }, host);
+      var select = el("select", {}, host);
+      el("option", { value: "", text: "(none)" }, select);
+      engine.images().forEach(function (img) { el("option", { value: img.key, text: img.name + (img.kind === "material" ? " (material)" : "") }, select); });
+      select.value = f.resource || "";
+      select.onchange = function () { if (select.value) change(node, "resource", select.value); };
+      // any other image of the project: search by name, then pick (it is added to the widget on save)
+      var search = el("input", { type: "text", placeholder: "Search another image in the project…" }, host);
+      var results = el("select", { hidden: true }, host);
+      var timer = 0;
+      search.oninput = function () {
+        clearTimeout(timer);
+        if (window.__offlineDemo || search.value.trim().length < 2) { results.hidden = true; return; }
+        timer = setTimeout(function () {
+          rpc("find_umg_images", { relative_path: filePath, query: search.value.trim() }).then(function (res) {
+            results.innerHTML = ""; results.hidden = false;
+            el("option", { value: "", text: ((res && res.images) || []).length + " found — pick one" }, results);
+            ((res && res.images) || []).forEach(function (img) { el("option", { value: img.key, text: img.name + "  (" + img.folder + ")" }, results); });
+          }).catch(function (e) { showErr(e.message || String(e)); });
+        }, 350);
+      };
+      results.onchange = function () {
+        if (!results.value) return;
+        // shown from its thumbnail-less placeholder until the next reload; the saved file gets the real reference
+        change(node, "resource", results.value);
+        log("image -> " + results.options[results.selectedIndex].text + " (visible after Save)");
+      };
+      colorRow(host, "Tint", f.tint, function (c) { change(node, "tint", c); });
+      colorRow(host, "Colour and opacity", f.image_color, function (c) { change(node, "image_color", c); });
+      numberRow(host, "Image size (W, H)", f.image_size, 1, function (i, v) { f.image_size[i] = v; change(node, "image_size", f.image_size.slice()); });
+    }
+    if (f.offsets) {
+      numberRow(host, "Position (X, Y)", f.offsets.slice(0, 2), 1, function (i, v) { change(node, "offsets." + i, v); });
+      numberRow(host, "Size (W, H) or right/bottom margin", f.offsets.slice(2, 4), 1, function (i, v) { change(node, "offsets." + (i + 2), v); });
+      numberRow(host, "Alignment (0-1)", f.alignment, 0.05, function (i, v) { f.alignment[i] = v; change(node, "alignment", f.alignment.slice()); });
+    } else if (f.padding) {
+      numberRow(host, "Padding (left, top, right, bottom)", f.padding, 1, function (i, v) { change(node, "padding." + i, v); });
+    }
+    numberRow(host, "Opacity (0-1)", [f.opacity], 0.05, function (i, v) { change(node, "opacity", Math.min(1, Math.max(0, v))); });
+    numberRow(host, "Offset (X, Y)", f.translation, 1, function (i, v) { f.translation[i] = v; change(node, "translation", f.translation.slice()); });
+    numberRow(host, "Scale (X, Y)", f.scale, 0.05, function (i, v) { f.scale[i] = v; change(node, "scale", f.scale.slice()); });
+    numberRow(host, "Rotation (degrees)", [f.angle], 1, function (i, v) { change(node, "angle", v); });
+    el("div", { className: "note", text: "Material parameters are not editable here yet." }, host);
+  }
+  function refreshUndo() {
+    if (window.__offlineDemo || !filePath) return;
+    rpc("umg_backup_count", { relative_path: filePath }).then(function (r) { $("btn-undo-save").hidden = !(r && r.count); }).catch(function () {});
+  }
+  $("btn-edit").onclick = function () {
+    this.classList.toggle("on");
+    if (engine) { engine.setEditMode(this.classList.contains("on")); engine.setDesignTime(this.classList.contains("on")); }
+    document.querySelector(".side").classList.toggle("editing", this.classList.contains("on"));
+    renderInspector(null); refreshSaveBar(); refreshUndo(); renderTree();
+  };
+  $("btn-discard").onclick = function () { pending = {}; load().catch(function (e) { showErr(e.message || String(e)); }); };
+  function save(saveInUefnFirst) {
+    var edits = Object.keys(pending).map(function (k) { return pending[k]; });
+    $("btn-save").disabled = true; $("btn-save-uefn").hidden = true; showErr("");
+    rpc("save_umg_edits", { relative_path: filePath, edits: edits, save_in_uefn_first: !!saveInUefnFirst }).then(function (res) {
+      if (res && res.dirty_in_uefn) $("btn-save-uefn").hidden = false;
+      if (!res || res.ok === false) throw new Error((res && res.error) || "Save failed");
+      if (res.saved_in_uefn) log("  UEFN saved its version first");
+      pending = {};
+      log("SAVED  " + edits.length + " change(s) into the .uasset" + (res.unchanged ? " (nothing differed)" : ""));
+      if (res.warning) log("  " + res.warning);
+      if (res.note) log("  " + res.note);
+      return load();
+    }).then(refreshUndo).catch(function (e) { showErr(e.message || String(e)); refreshSaveBar(); });
+  }
+  $("btn-save").onclick = function () { save(false); };
+  $("btn-save-uefn").onclick = function () { save(true); };
+  $("btn-undo-save").onclick = function () {
+    rpc("restore_umg_backup", { relative_path: filePath }).then(function (res) {
+      if (!res || res.ok === false) throw new Error((res && res.error) || "Restore failed");
+      pending = {}; log("RESTORED the file from before the last save");
+      return load();
+    }).then(refreshUndo).catch(function (e) { showErr(e.message || String(e)); });
+  };
+
   $("btn-reload").onclick = function () { load().catch(function (e) { showErr(e.message || String(e)); }); };
   $("btn-details").onclick = function () { location.href = "asset.html?details=1&file=" + encodeURIComponent(filePath); };
   $("scrub").oninput = function () {

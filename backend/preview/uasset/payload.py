@@ -105,7 +105,7 @@ def _decode_delta_rgba(data: bytes, width: int, height: int) -> bytes:
     Layout verified on 512-square, 1024-square and 1200x662 UEFN source images:
     columns split to <=1024 pixels, balanced and aligned to 16 pixels; each
     column uses floor(area / 32768) balanced row groups. The first row of each
-    group is absolute. BGRA8 source is serialized in RGBA order for UEDELTA.
+    group is absolute. Pixels stay in BGRA order (the caller converts).
     Pillow adds unsigned bytes modulo 256 in C, keeping memory bounded per row.
     """
     from PIL import Image, ImageChops
@@ -160,9 +160,8 @@ def texture_png(pkg: Package) -> Optional[bytes]:
             return None
         if compression == "TSCF_UEDELTA":
             data = _decode_delta_rgba(data, width, height)
-            image = Image.frombytes("RGBA", (width, height), data)
-        else:
-            image = Image.frombytes("RGBA", (width, height), data, "raw", "BGRA")
+        # BGRA in both cases: checked against UEFN's own rendering of these textures
+        image = Image.frombytes("RGBA", (width, height), data, "raw", "BGRA")
     else:
         return None
     buf = io.BytesIO()

@@ -42,3 +42,20 @@ def test_no_thumbnail(tmp_path):
 
 def test_missing_file(tmp_path):
     assert extract_embedded_thumbnail(tmp_path / "gone.uasset") is None
+
+
+def test_jpeg_thumbnail_gets_its_red_and_blue_back(tmp_path):
+    import io
+
+    from PIL import Image
+
+    from .thumbnail import embedded_thumbnail_png
+
+    jpeg = io.BytesIO()
+    Image.new("RGB", (64, 64), (250, 200, 20)).save(jpeg, "JPEG", quality=95)  # as Unreal stores a blue pixel
+    data = jpeg.getvalue()
+    asset = tmp_path / "T.uasset"
+    asset.write_bytes(bytes(40) + struct.pack("<iii", 64, -64, len(data)) + data + b"tail")
+    with Image.open(io.BytesIO(embedded_thumbnail_png(asset))) as img:
+        r, g, b, _a = img.convert("RGBA").getpixel((32, 32))
+    assert abs(r - 20) < 12 and abs(g - 200) < 12 and abs(b - 250) < 12

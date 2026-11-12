@@ -52,6 +52,8 @@ class Export:
     serial_offset: int
     script_start: int = 0
     script_end: int = 0
+    size_pos: int = 0  # file position of serial_size (serial_offset follows)
+    script_pos: int = 0  # file position of script_start (script_end follows); 0 if absent
 
 
 @dataclass
@@ -67,6 +69,13 @@ class Package:
     soft_object_paths: list[str] = field(default_factory=list)
     bulk_data_start: int = 0
     payload_toc_offset: int = 0
+    # file positions of the summary's absolute offsets that sit after the export data
+    bulk_data_start_pos: int = 0
+    payload_toc_pos: int = 0
+    data_resource_offset: int = 0
+    data_resource_pos: int = 0
+    fields: dict[str, tuple[int, int, bool]] = field(default_factory=dict)  # summary field -> (pos, value, 64-bit)
+    names_end: int = 0
     total_header_size: int = 0
 
     # -- names -------------------------------------------------------------
@@ -169,6 +178,14 @@ def load_package(source: Path | str | bytes) -> Package:
         raise ReadError(f"unsupported package (legacy file version {legacy}, need UE5)")
     r.i32()  # LegacyUE3Version
     pkg = Package(data=data)
+
+    def mark(name: str, wide: bool = False) -> int:
+        """Read a summary field and remember where it is, for the writer."""
+        position = r.pos
+        value = r.i64() if wide else r.i32()
+        pkg.fields[name] = (position, value, wide)
+        return value
+
     pkg.ue4_version = r.i32()
     pkg.ue5_version = r.i32()
     r.i32()  # licensee version
@@ -177,33 +194,33 @@ def load_package(source: Path | str | bytes) -> Package:
     ue5 = pkg.ue5_version
     if ue5 >= UE5_PACKAGE_SAVED_HASH:
         r.raw(20)  # SavedHash
-        pkg.total_header_size = r.i32()
+        pkg.total_header_size = mark("total_header_size")
     _custom_versions(r)
     if ue5 < UE5_PACKAGE_SAVED_HASH:
-        pkg.total_header_size = r.i32()
+        pkg.total_header_size = mark("total_header_size")
     pkg.package_name = r.fstring()
     pkg.package_flags = r.u32()
     editor = not (pkg.package_flags & PKG_FILTER_EDITOR_ONLY)
     if not editor:
         raise ReadError("cooked package (editor-only data stripped) is not supported")
-    name_count, name_offset = r.i32(), r.i32()
+    name_count, name_offset = mark("name_count"), mark("name_offset")
     soft_count = soft_offset = 0
     if ue5 >= UE5_ADD_SOFTOBJECTPATH_LIST:
-        soft_count, soft_offset = r.i32(), r.i32()
+        soft_count, soft_offset = r.i32(), mark("soft_object_paths_offset")
     r.fstring()  # LocalizationId
-    r.i32(), r.i32()  # gatherable text count / offset
-    export_count, export_offset = r.i32(), r.i32()
-    import_count, import_offset = r.i32(), r.i32()
+    r.i32(), mark("gatherable_text_offset")
+    export_count, export_offset = r.i32(), mark("export_offset")
+    import_count, import_offset = mark("import_count"), mark("import_offset")
     if ue5 >= UE5_VERSE_CELLS:
-        r.raw(16)
+        r.i32(), mark("cell_export_offset"), r.i32(), mark("cell_import_offset")
     if ue5 >= UE5_METADATA_SERIALIZATION_OFFSET:
-        r.i32()
-    r.i32()  # DependsOffset
-    r.i32(), r.i32()  # soft package references count / offset
-    r.i32()  # SearchableNamesOffset
-    r.i32()  # ThumbnailTableOffset
+        mark("metadata_offset")
+    mark("depends_offset")
+    r.i32(), mark("soft_package_references_offset")
+    mark("searchable_names_offset")
+    mark("thumbnail_table_offset")
     if ue5 >= UE5_IMPORT_TYPE_HIERARCHIES:
-        r.i32(), r.i32()  # import type hierarchies count / offset
+        r.i32(), mark("import_type_hierarchies_offset")
     if ue5 < UE5_PACKAGE_SAVED_HASH:
         r.guid()
     r.guid()  # PersistentGuid
@@ -219,16 +236,21 @@ def load_package(source: Path | str | bytes) -> Package:
     r.u32()  # PackageSource
     for _ in range(r.i32()):
         r.fstring()
-    r.i32()  # AssetRegistryDataOffset
-    pkg.bulk_data_start = r.i64()
-    r.i32()  # WorldTileInfoDataOffset
+    mark("asset_registry_data_offset")
+    pkg.bulk_data_start_pos = r.pos
+    pkg.bulk_data_start = mark("bulk_data_start", True)
+    mark("world_tile_info_offset")
     chunk_ids = r.i32()
     if not 0 <= chunk_ids < 4096:
         raise ReadError(f"implausible chunk id count {chunk_ids}")
     r.raw(chunk_ids * 4)
-    r.i32(), r.i32()  # preload dependency count / offset
-    r.i32()  # NamesReferencedFromExportDataCount
-    pkg.payload_toc_offset = r.i64()
+    r.i32(), mark("preload_dependency_offset")
+    mark("names_referenced_from_export_data_count")
+    pkg.payload_toc_pos = r.pos
+    pkg.payload_toc_offset = mark("payload_toc_offset", True)
+    if ue5 >= UE5_DATA_RESOURCES:
+        pkg.data_resource_pos = r.pos
+        pkg.data_resource_offset = mark("data_resource_offset")
 
     for count, offset, what in (
         (name_count, name_offset, "name"),
@@ -242,6 +264,7 @@ def load_package(source: Path | str | bytes) -> Package:
     for _ in range(name_count):
         pkg.names.append(r.fstring())
         r.raw(4)  # two 16-bit hashes
+    pkg.names_end = r.pos
 
     if soft_count:
         r.pos = soft_offset
@@ -268,6 +291,7 @@ def load_package(source: Path | str | bytes) -> Package:
         class_index, super_index, template_index, outer_index = r.i32(), r.i32(), r.i32(), r.i32()
         object_name = pkg.read_name(r)
         object_flags = r.u32()
+        size_pos = r.pos
         serial_size, serial_offset = r.i64(), r.i64()
         r.raw(12)  # bForcedExport, bNotForClient, bNotForServer
         if ue5 < UE5_REMOVE_OBJECT_EXPORT_PACKAGE_GUID:
@@ -279,8 +303,9 @@ def load_package(source: Path | str | bytes) -> Package:
         if ue5 >= UE5_OPTIONAL_RESOURCES:
             r.i32()  # bGeneratePublicHash
         r.raw(20)  # dependency header
-        script_start = script_end = 0
+        script_start = script_end = script_pos = 0
         if ue5 >= UE5_SCRIPT_SERIALIZATION_OFFSET:
+            script_pos = r.pos
             script_start, script_end = r.i64(), r.i64()
         if not (0 <= serial_offset <= len(data) and 0 <= serial_size <= len(data)):
             raise ReadError(f"export {i} ({object_name}) points outside the file")
@@ -296,6 +321,8 @@ def load_package(source: Path | str | bytes) -> Package:
                 serial_size=serial_size,
                 serial_offset=serial_offset,
                 script_start=script_start,
+                size_pos=size_pos,
+                script_pos=script_pos,
                 script_end=script_end,
             )
         )

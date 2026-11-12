@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .paths_plugin import PANEL_UI_HTTP_PORT, PLUGIN_ID, cache_root
-from .thumbnail import extract_embedded_thumbnail
+from .thumbnail import embedded_thumbnail_png
 from .uasset import ReadError, load_package
 from .uasset.payload import oodle_available, sound_wav, texture_png
 from .uasset.umg_spec import build_umg_spec, project_resolver
@@ -73,7 +73,7 @@ def _to_png(source: Path) -> Optional[bytes]:
 def _fill_image(asset: dict[str, Any], key: str, file: Path, mount: str, online: bool) -> None:
     media = _media_dir()
     name = _media_key(file)
-    real = media / f"{name}.source-v2.png"
+    real = media / f"{name}.source-v3.png"
     if not real.is_file() and asset["kind"] == "texture":
         png = None
         try:
@@ -94,11 +94,10 @@ def _fill_image(asset: dict[str, Any], key: str, file: Path, mount: str, online:
         with Image.open(real) as image:
             asset.update(width=image.width, height=image.height)
         return
-    thumb = extract_embedded_thumbnail(file)
-    if thumb:
-        ext = "png" if thumb[:4] == b"\x89PNG" else "jpg"
-        target = media / f"{name}.thumb.{ext}"
-        if not target.is_file():
+    target = media / f"{name}.thumb2.png"  # "thumb2": true colours (earlier files had red/blue exchanged)
+    thumb = None if target.is_file() else embedded_thumbnail_png(file)
+    if thumb or target.is_file():
+        if thumb:
             target.write_bytes(thumb)
         asset.update(url=_media_url(target.name), quality="thumbnail")
 
@@ -145,6 +144,9 @@ def build_preview(file: Path, *, online: bool = False) -> dict[str, Any]:
         if kind in ("texture", "material"):
             if path.is_file():
                 _fill_image(asset, key, path, mount, online)
+            if kind == "material" and key in spec.get("materials", {}):
+                counts["materials_live"] = counts.get("materials_live", 0) + 1  # drawn by its own shader
+                continue
             bucket = {"full": "images_full", "thumbnail": "images_thumbnail"}.get(asset.get("quality", ""), "images_missing")
             counts[bucket] += 1
         elif kind == "sound":

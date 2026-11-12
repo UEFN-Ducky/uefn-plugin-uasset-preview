@@ -16,7 +16,8 @@ function load({ embedded = false, offline = false, protocol = 'file:' } = {}) {
       textContent: '', classList: { contains: () => false } });
     return elements.get(id);
   };
-  const engine = { spec: example.spec, setViewport() {}, setHints() {}, setMuted() {}, on() {}, switchers: () => [] };
+  const engine = { spec: example.spec, setViewport() {}, setHints() {}, setMuted() {}, on() {}, switchers: () => [],
+    setEditMode() {}, setDesignTime() {}, tree: () => [], toggleStats() {}, selection: () => null, images: () => [], materialReport: () => ({ shaders: 0, failed: [] }) };
   const window = { setTimeout: () => 1, clearTimeout() {},
     addEventListener: (_, fn) => listeners.add(fn), removeEventListener: (_, fn) => listeners.delete(fn),
     UmgEngine: { create: (_, spec) => { mounted.push(spec.name); return engine; } } };

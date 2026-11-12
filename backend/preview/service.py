@@ -17,7 +17,7 @@ from .kinds import (
     supports_texture_preview,
 )
 from .paths import disk_path_to_asset_path, is_previewable_binary
-from .thumbnail import extract_embedded_thumbnail
+from .thumbnail import embedded_thumbnail_png
 from .widget_tree import summarize_widget_tree
 from .verse_link import find_verse_source, stem_from_relative_path
 from frontend.settings import PANEL_LISTENER_PORT
@@ -64,20 +64,43 @@ def _fetch_asset_class(asset_path: str) -> str:
     return ""
 
 
-def _class_from_file(relative_path: str) -> str:
-    """Asset class read from the .uasset itself — works with UEFN closed."""
+def _identity_from_file(relative_path: str) -> tuple[str, str]:
+    """(class, asset path) read from the .uasset itself; ("", "") when it cannot be read.
+
+    The file is the authority: the class UEFN reports depends on which island UEFN has
+    open (another island answers "None"), and a cached record may come from such a moment.
+    """
     if not relative_path.lower().endswith(".uasset"):
-        return ""
-    from .uasset import main_asset_class
+        return "", ""
+    from .uasset import ReadError, load_package
 
     try:
-        return main_asset_class(pf.resolve_project_file_path(relative_path))
-    except Exception:  # noqa: BLE001 - an unresolvable path just leaves the class unknown
-        return ""
+        pkg = load_package(pf.resolve_project_file_path(relative_path))
+    except (ReadError, OSError, ValueError):
+        return "", ""
+    except Exception:  # noqa: BLE001 - an unresolvable path just leaves the identity unknown
+        return "", ""
+    stem = pkg.package_name.rsplit("/", 1)[-1]
+    cls = next((pkg.class_name(e) for e in pkg.exports if e.outer_index == 0 and e.object_name == stem), "")
+    return cls, pkg.package_name
+
+
+def _class_from_file(relative_path: str) -> str:
+    """Asset class read from the .uasset itself — works with UEFN closed."""
+    return _identity_from_file(relative_path)[0]
+
+
+def asset_path_of(relative_path: str) -> str:
+    """UEFN path of a project file: the package name saved in it, else Content root + path."""
+    return _identity_from_file(relative_path)[1] or disk_path_to_asset_path(relative_path, _content_root())
 
 
 def _annotate_preview(result: dict[str, Any], relative_path: str) -> dict[str, Any]:
-    asset_class = str(result.get("asset_class") or "") or _class_from_file(relative_path)
+    file_class, file_path = _identity_from_file(relative_path)
+    if file_path:
+        result["asset_path"] = file_path
+    reported = str(result.get("asset_class") or "")
+    asset_class = file_class or ("" if reported == "None" else reported)
     kind = guess_preview_kind(relative_path, asset_class)
     result["preview_kind"] = kind
     result["asset_class"] = asset_class or result.get("asset_class") or ""
@@ -103,7 +126,7 @@ def _local_result(
     verse_source = find_verse_source(project_root, relative_path=relative_path, verse_class_stem=verse_stem)
     mode = "verse" if verse_source or verse_stem else "asset"
     content_root = _content_root() if online else "/Game/"
-    asset_path = disk_path_to_asset_path(relative_path, content_root)
+    asset_path = _identity_from_file(relative_path)[1] or disk_path_to_asset_path(relative_path, content_root)
     badge_label = verse_stem or Path(relative_path).stem[:8] or "asset"
     stat = pf.stat_project_file(relative_path)
     mtime_ns = int(stat.get("mtime_ns") or 0)
@@ -178,7 +201,7 @@ def _preview_project_asset(rel: str, mtime_ns: int, size: int) -> dict[str, Any]
         # Older cache entries may lack class — enrich once while online (no re-export).
         # Also refresh ObjectRedirector: registry class is a stub; follow destination.
         if online and (not asset_class or asset_class.lower() == "objectredirector"):
-            asset_path = str(out.get("asset_path") or disk_path_to_asset_path(rel, _content_root()))
+            asset_path = asset_path_of(rel)
             asset_class = _fetch_asset_class(asset_path)
             if asset_class:
                 out["asset_class"] = asset_class
@@ -201,7 +224,7 @@ def open_asset_in_uefn(relative_path: str) -> dict[str, Any]:
     rel = (relative_path or "").strip().replace("\\", "/")
     if not _listener_online():
         return {"ok": False, "error": "UEFN is not running — start UEFN to open assets."}
-    asset_path = disk_path_to_asset_path(rel, _content_root())
+    asset_path = asset_path_of(rel)
     try:
         from backend.bridge import post_command_to_listener
 
@@ -248,7 +271,7 @@ def load_static_mesh_preview(relative_path: str) -> dict[str, Any]:
             "listener_online": False,
         }
 
-    asset_path = disk_path_to_asset_path(rel, _content_root())
+    asset_path = asset_path_of(rel)
     asset_class = _fetch_asset_class(asset_path)
     # ObjectRedirector means the package was moved/renamed — let the listener
     # follow destination_object instead of rejecting by registry class.
@@ -344,7 +367,7 @@ def _embedded_thumbnail_preview(
 ) -> dict[str, Any] | None:
     """Serve the Content Browser thumbnail stored in the .uasset (no UEFN needed)."""
     try:
-        image = extract_embedded_thumbnail(pf.resolve_project_file_path(rel))
+        image = embedded_thumbnail_png(pf.resolve_project_file_path(rel))
     except Exception:
         return None
     if not image:
@@ -372,7 +395,7 @@ def _live_capture_preview(
     """Render the asset's thumbnail live in UEFN (current state, level untouched)."""
     import time
 
-    asset_path = disk_path_to_asset_path(rel, _content_root())
+    asset_path = asset_path_of(rel)
     try:
         from backend.bridge import post_command_to_listener
 
@@ -507,7 +530,7 @@ def _load_uefn_image_preview(relative_path: str, *, expected: str) -> dict[str, 
             "listener_online": False,
         }
 
-    asset_path = disk_path_to_asset_path(rel, _content_root())
+    asset_path = asset_path_of(rel)
     asset_class = _fetch_asset_class(asset_path)
     if (
         asset_class
@@ -596,7 +619,7 @@ def load_widget_tree(relative_path: str) -> dict[str, Any]:
     rel = (relative_path or "").strip().replace("\\", "/")
     if not _listener_online():
         return {"ok": False, "error": "UEFN is offline — start UEFN to read the widget tree."}
-    asset_path = disk_path_to_asset_path(rel, _content_root())
+    asset_path = asset_path_of(rel)
     try:
         from backend.bridge import post_command_to_listener
 

@@ -122,6 +122,26 @@ def _curve_channel(pkg: Package, r: Reader) -> dict[str, Any]:
             "tick_rate": numerator / denominator if denominator else 0.0}
 
 
+def _expression_input(pkg: Package, r: Reader) -> dict[str, Any]:
+    """FExpressionInput: the node output wired into a material node's pin."""
+    node = r.i32()
+    output = r.i32()
+    pkg.read_name(r)  # InputName
+    mask = [r.i32() for _ in range(5)]  # Mask, R, G, B, A
+    return {"node": node, "output": output,
+            "mask": "".join(c for c, on in zip("rgba", mask[1:]) if on) if mask[0] else ""}
+
+
+def _material_input(constant):
+    def read(pkg: Package, r: Reader) -> dict[str, Any]:
+        out = _expression_input(pkg, r)
+        out["use_constant"] = bool(r.i32())
+        out["constant"] = constant(r)
+        return out
+
+    return read
+
+
 # Structs with their own binary serializer (no tags inside).
 _NATIVE_STRUCTS = {
     "Vector2D": lambda p, r: _vec(r, 2),
@@ -145,6 +165,11 @@ _NATIVE_STRUCTS = {
     "MovieSceneFrameRange": _frame_range,
     "MovieSceneFloatChannel": _curve_channel,
     "MovieSceneDoubleChannel": _curve_channel,
+    "ExpressionInput": _expression_input,
+    "ScalarMaterialInput": _material_input(lambda r: r.f32()),
+    "ColorMaterialInput": _material_input(lambda r: _vec(r, 4, "f")),
+    "VectorMaterialInput": _material_input(lambda r: _vec(r, 3, "f")),
+    "Vector2MaterialInput": _material_input(lambda r: _vec(r, 2, "f")),
     "Box2D": lambda p, r: {"min": _vec(r, 2), "max": _vec(r, 2), "valid": r.u8()},
 }
 

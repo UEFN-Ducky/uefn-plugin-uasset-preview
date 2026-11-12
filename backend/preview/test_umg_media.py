@@ -17,7 +17,7 @@ def test_offline_source_supersedes_thumbnail_and_is_cached(tmp_path, monkeypatch
     def unexpected(*_):
         raise AssertionError("full source must not call listener or thumbnail fallback")
     monkeypatch.setattr(preview, "_listener", unexpected)
-    monkeypatch.setattr(preview, "extract_embedded_thumbnail", unexpected)
+    monkeypatch.setattr(preview, "embedded_thumbnail_png", unexpected)
     (tmp_path / f"{preview._media_key(file)}.thumb.jpg").write_bytes(b"old thumbnail")
     asset = {"kind": "texture"}
     preview._fill_image(asset, "/Project/Texture.Texture", file, "Project", False)
@@ -37,7 +37,7 @@ def test_bad_source_falls_back_without_breaking_widget(tmp_path, monkeypatch):
     def invalid(_):
         raise ValueError("unsupported source")
     monkeypatch.setattr(preview, "texture_png", invalid)
-    monkeypatch.setattr(preview, "extract_embedded_thumbnail", lambda _: b"\xff\xd8thumbnail")
+    monkeypatch.setattr(preview, "embedded_thumbnail_png", lambda _: b"\xff\xd8thumbnail")
     asset = {"kind": "texture"}
     preview._fill_image(asset, "/Project/Texture.Texture", file, "Project", False)
     assert asset["quality"] == "thumbnail"
