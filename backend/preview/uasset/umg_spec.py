@@ -12,6 +12,7 @@ from typing import Any, Callable, Optional
 from .package import Export, Package, load_package
 from .props import Raw, Ref, export_properties
 from .reader import ReadError
+from .umg_bindings import view_bindings
 
 MAX_NESTING = 6
 DEFAULT_DESIGN_SIZE = [1920, 1080]
@@ -642,6 +643,7 @@ def build_umg_spec(path: Path | str, resolve: Callable[[str], Optional[Path]]) -
         "root": root,
         "animations": animations,
         "events": _events(pkg),
+        "bindings": view_bindings(pkg, defaults),
         "assets": builder.assets,
         "warnings": builder.warnings,
     }

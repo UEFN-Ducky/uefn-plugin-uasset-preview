@@ -106,7 +106,7 @@
     function anyPlaying() { return players.some(function (p) { return p.state === "playing"; }); }
     var audio = null, audioBuffers = {}, muted = false;
     var showHints = false;
-    var editMode = false, selected = null, drag = null;
+    var editMode = false, selected = null, drag = null, highlighted = null;
 
     function emit(type, detail) { listeners.forEach(function (fn) { fn(type, detail || {}); }); }
     function invalidate() { dirty = true; if (!raf && !disposed) raf = requestAnimationFrame(frame); }
@@ -679,6 +679,18 @@
         ctx.lineWidth = 2 * dpr; ctx.setLineDash([6 * dpr, 4 * dpr]);
         ctx.strokeStyle = hint.hot ? "#ffffff" : "#7dd3fc"; ctx.stroke(); ctx.setLineDash([]);
       });
+      if (highlighted) { // the widget a binding in the side list points at
+        var hl = null;
+        for (var hi = painted.length - 1; hi >= 0; hi--) if (painted[hi].node === highlighted) { hl = painted[hi]; break; }
+        if (hl) {
+          var box = [[0, 0], [highlighted.rect.w, 0], [highlighted.rect.w, highlighted.rect.h], [0, highlighted.rect.h]]
+            .map(function (p) { return hl.matrix.transformPoint(new DOMPoint(p[0], p[1])); });
+          ctx.beginPath(); ctx.moveTo(box[0].x, box[0].y);
+          box.slice(1).forEach(function (p) { ctx.lineTo(p.x, p.y); });
+          ctx.closePath(); ctx.fillStyle = "rgba(125,211,252,0.18)"; ctx.fill();
+          ctx.lineWidth = 2 * dpr; ctx.strokeStyle = "#7dd3fc"; ctx.stroke();
+        }
+      }
       if (editMode && selected) {
         var entry = null;
         for (var pi = painted.length - 1; pi >= 0; pi--) if (painted[pi].node === selected) { entry = painted[pi]; break; }
@@ -1057,6 +1069,11 @@
         var n = allNodes.filter(function (x) { return x.id === id; })[0];
         if (n && n.children.length) { n.props.active = (index + n.children.length) % n.children.length; invalidate(); return n.props.active; }
         return 0;
+      },
+      highlight: function (name) { // outline this blueprint's widget called name (null: none)
+        var n = name ? nodesByName[name] : null;
+        if (n !== highlighted) { highlighted = n || null; invalidate(); }
+        return !!n;
       },
       setText: function (name, text) { var n = nodesByName[name]; if (n) { n.props.text = text; invalidate(); } },
       play: function (name, opts) {
