@@ -257,6 +257,7 @@
     renderPages();
     mediaBanner(res);
     window.__umg = engine;
+    if (/(^|[#&])stats/.test(location.hash)) engine.toggleStats(); // dev: open with the performance overlay
     engine.setEditMode($("btn-edit").classList.contains("on"));
     engine.setDesignTime($("btn-edit").classList.contains("on")); // editing shows everything, as UEFN's designer does
     renderInspector(null); refreshSaveBar(); renderTree(); undoStack = []; originals = {};

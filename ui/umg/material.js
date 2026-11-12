@@ -272,12 +272,20 @@
     }
 
     /* state: {time, tint:[r,g,b,a] linear, scalar:{name:v}, vector:{name:[4]}, images:{assetKey: image}} */
+    var region = { x: 0, y: 0, w: 1, h: 1 }; // where the last render's picture is in the canvas
     function render(material, width, height, state) {
       var prog = program(material);
       if (!prog) return false;
       width = Math.max(1, Math.min(2048, Math.round(width))); height = Math.max(1, Math.min(2048, Math.round(height)));
-      if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
-      gl.viewport(0, 0, width, height);
+      // Resizing a WebGL canvas reallocates it (over 1 ms each time in the app's WebView2, for every
+      // material, every frame): the canvas only grows, and the picture sits in its top-left corner
+      // (WebGL counts rows from the bottom), which the caller copies with region().
+      if (canvas.width < width || canvas.height < height) {
+        canvas.width = Math.max(canvas.width, width); canvas.height = Math.max(canvas.height, height);
+      }
+      region.x = 0; region.y = 0; region.w = width; region.h = height;
+      gl.viewport(0, canvas.height - height, width, height);
+      gl.enable(gl.SCISSOR_TEST); gl.scissor(0, canvas.height - height, width, height);
       gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
       gl.disable(gl.BLEND);
       gl.useProgram(prog);
@@ -299,7 +307,9 @@
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       return true;
     }
-    return { canvas: canvas, render: render };
+    var info = "";
+    try { var dbg = gl.getExtension("WEBGL_debug_renderer_info"); info = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : String(gl.getParameter(gl.RENDERER)); } catch (e) { info = "?"; }
+    return { canvas: canvas, render: render, region: region, info: info };
   }
 
   window.UmgMaterial = { compile: compile, createRenderer: createRenderer };

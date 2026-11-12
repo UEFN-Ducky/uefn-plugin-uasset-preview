@@ -156,6 +156,7 @@
      * Time) is rendered every frame. The picture is capped in resolution (UI materials are soft
      * gradients) and its size moves in 32 px steps, so a widget growing in an animation does not
      * re-render a still material every frame. */
+    var MATERIAL_FRAME_MS = 1000 / 60 - 2; // a little under, so a 60 Hz screen keeps every frame
     var MATERIAL_MAX_PX = 512, MATERIAL_STEP_PX = 32, MATERIAL_CACHE_MAX = 64;
     var materialCache = {}, materialCacheSize = 0;
     function drawMaterial(key, tint, w, h, params) {
@@ -175,25 +176,31 @@
           if (!img || img === "missing" || img === "clear") return false;
           sources[m.textures[i]] = img;
         }
+        var renderStart = performance.now();
         var ok = materialRenderer.render(m, bw, bh, {
           time: now, tint: tint, images: sources, scalar: params && params.scalar, vector: params && params.vector
         });
+        perf.render += performance.now() - renderStart;
         if (!ok) {
           if (m.error && !m.reported) { m.reported = true; materialErrors.push({ name: (spec.assets[key] || {}).name || key, error: m.error }); delete materials[key]; }
           return false;
         }
-        if (live) entry = { canvas: materialRenderer.canvas, at: now }; // drawn at once, before the next render
+        var r = materialRenderer.region;
+        if (live) entry = { canvas: materialRenderer.canvas, sx: r.x, sy: r.y, sw: r.w, sh: r.h, at: now }; // drawn at once, before the next render
         else {
           if (materialCacheSize >= MATERIAL_CACHE_MAX) { materialCache = {}; materialCacheSize = 0; }
           entry = materialCache[id] = { canvas: document.createElement("canvas"), at: now };
           entry.canvas.width = bw; entry.canvas.height = bh; materialCacheSize++;
           var copy = entry.canvas.getContext("2d");
-          copy.drawImage(materialRenderer.canvas, 0, 0);
+          copy.drawImage(materialRenderer.canvas, r.x, r.y, r.w, r.h, 0, 0, bw, bh);
         }
       }
       if (m.usesTime) timeDrawn = true;
       if (m.additive) { ctx.save(); ctx.globalCompositeOperation = "lighter"; }
-      ctx.drawImage(entry.canvas, 0, 0, w, h);
+      var copyStart = performance.now();
+      if (entry.sw) ctx.drawImage(entry.canvas, entry.sx, entry.sy, entry.sw, entry.sh, 0, 0, w, h);
+      else ctx.drawImage(entry.canvas, 0, 0, w, h);
+      perf.copy += performance.now() - copyStart; perf.count++;
       if (m.additive) ctx.restore();
       return true;
     }
@@ -615,27 +622,33 @@
       ctx.restore();
     }
 
+    var perf = { render: 0, copy: 0, count: 0 }, perfShown = { render: 0, copy: 0, count: 0 };
     var showStats = false, frameTimes = [], frameGaps = [], lastFrameAt = 0, hoverAt = 0, hoverLatency = null;
     function drawStats() {
       var avg = function (a) { return a.length ? a.reduce(function (s, v) { return s + v; }, 0) / a.length : 0; };
       var gap = avg(frameGaps), lines = [
         "fps " + (gap ? Math.round(1000 / gap) : "-") + " · frame " + avg(frameTimes).toFixed(1) + " ms (max " + Math.max.apply(null, frameTimes.concat([0])).toFixed(1) + ")",
         "hover -> first movement " + (hoverLatency == null ? "-" : hoverLatency.toFixed(0) + " ms"),
-        "canvas " + canvas.width + "x" + canvas.height + " · materials " + Object.keys(materials).length
+        "canvas " + canvas.width + "x" + canvas.height + " · materials " + Object.keys(materials).length,
+        "materials: shader " + perfShown.render.toFixed(1) + " ms + copy " + perfShown.copy.toFixed(1) + " ms (" + perfShown.count + " draws)",
+        "gpu " + ((materialRenderer && materialRenderer.info) || "-").slice(0, 46)
       ];
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.font = "12px ui-monospace, Consolas, monospace"; ctx.textAlign = "left"; ctx.textBaseline = "top";
-      ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.fillRect(4, 4, 330, 54);
+      ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.fillRect(4, 4, 380, 86);
       ctx.fillStyle = "#9eff9e"; lines.forEach(function (l, i) { ctx.fillText(l, 10, 9 + i * 16); });
     }
     function frame(now) {
       raf = 0;
       if (disposed) return;
       var workStart = performance.now();
-      if (lastFrameAt) { frameGaps.push(now - lastFrameAt); if (frameGaps.length > 60) frameGaps.shift(); }
-      lastFrameAt = now;
       if (anyPlaying()) stepPlayers(now);
       if (!dirty && !anyPlaying() && !timeDrawn) return;
+      // Only an animated material changed: 60 images a second are plenty, whatever the screen's rate
+      // (a 144-360 Hz screen would otherwise redraw everything 2-6 times as often for nothing).
+      if (!dirty && !anyPlaying() && lastFrameAt && now - lastFrameAt < MATERIAL_FRAME_MS) { raf = requestAnimationFrame(frame); return; }
+      if (lastFrameAt) { frameGaps.push(now - lastFrameAt); if (frameGaps.length > 60) frameGaps.shift(); }
+      lastFrameAt = now;
       dirty = false; timeDrawn = false;
       var dpr = Math.min(window.devicePixelRatio || 1, 2), cw = canvas.clientWidth, ch = canvas.clientHeight;
       if (canvas.width !== Math.round(cw * dpr) || canvas.height !== Math.round(ch * dpr)) {
@@ -681,6 +694,7 @@
       }
       if (hoverAt && players.some(function (p) { return p.dir > 0 && p.time > p.anim.start; })) { hoverLatency = performance.now() - hoverAt; hoverAt = 0; }
       frameTimes.push(performance.now() - workStart); if (frameTimes.length > 60) frameTimes.shift();
+      perfShown = perf; perf = { render: 0, copy: 0, count: 0 };
       if (showStats) drawStats();
       if (anyPlaying() || timeDrawn || showStats) raf = requestAnimationFrame(frame);
       else lastFrameAt = 0;
@@ -999,6 +1013,12 @@
       on: function (fn) { listeners.push(fn); },
       setViewport: function (w, h) { viewport = { w: w, h: h }; invalidate(); },
       setHints: function (on) { showHints = !!on; invalidate(); },
+      stats: function () {
+        var avg = function (x) { return x.length ? x.reduce(function (t, v) { return t + v; }, 0) / x.length : 0; };
+        return { fps: frameGaps.length ? 1000 / avg(frameGaps) : 0, frameMs: avg(frameTimes), hoverMs: hoverLatency,
+          shaderMs: perfShown.render, copyMs: perfShown.copy, draws: perfShown.count, gpu: materialRenderer && materialRenderer.info,
+          playing: players.filter(function (p) { return p.state === "playing"; }).map(function (p) { return p.anim.name + (p.loop ? " (loop)" : ""); }) };
+      },
       toggleStats: function () { showStats = !showStats; frameTimes = []; frameGaps = []; invalidate(); return showStats; },
       setDesignTime: function (on) { designTime = !!on; invalidate(); },
       setEditMode: function (on) { editMode = !!on; drag = null; hovered = null; pressed = null; if (!on) selected = null; canvas.style.cursor = "default"; invalidate(); },
