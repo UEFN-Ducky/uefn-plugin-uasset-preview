@@ -127,13 +127,22 @@ Opening one of these assets shows more than its thumbnail:
   named like it when the parent material is outside the project) and a "Mesh info"
   block (size, triangles, vertices, LODs, Nanite, collision, UV channels, materials).
   BuildScale3D is applied. UEFN's FBX export stays as a button.
-- **Niagara System** (`backend/preview/niagara_preview.py`, `ui/niagara.js`): the
-  particles are not simulated; each emitter is listed (on/off, CPU/GPU, local space)
-  with its renderers, their material's texture or colour, their meshes, the particle
-  colour, and the module inputs set in its scripts (spawn rate, burst, lifetime,
-  loop...), plus the thumbnail UEFN saved when there is one. UEFN's asset capture does
-  not support Niagara, so a moving picture would need the effect played in the level or
-  in the Niagara editor.
+- **Niagara System** (`backend/preview/niagara_preview.py`, `ui/niagara.js`): each
+  emitter is listed (on/off, CPU/GPU, local space) with its renderers, their material's
+  texture or colour, their meshes, the particle colour, and the module inputs set in its
+  scripts (spawn rate, burst, lifetime, loop...), plus the thumbnail UEFN saved.
+- **Niagara playback, experimental** (`uasset/niagara_vm.py`, `ui/niagara_sim.js`): the
+  editor .uasset keeps each script's compiled program (`CachedScriptVM`: classic
+  VectorVM bytecode, attributes, parameters, internal constants). The panel runs it: an
+  interpreter for the bytecode, the system spawn / update scripts (which decide each
+  frame's births through `SpawnOutputInfo`, with the User parameters), then each CPU
+  emitter's particle spawn and update scripts; sprites are drawn with their texture,
+  flipbook cell, rotation and blend mode, other renderers as glowing points. External
+  functions run: float / colour / vector curves (their baked LUT), sprite renderer info,
+  matrix to quaternion. Not yet: GPU emitters (their shader is not in the file), static
+  mesh sockets and triangles, collision queries, vector fields, persistent IDs
+  (`acquire_id`). The constant buffer layouts are documented in `niagara_vm.py`. On
+  PLSTRENDING: 59 of 119 emitters run, 34 of 75 effects show at least one.
 
 The 3D viewer bundle (`ui/viewer.bundle.js`) defines `import.meta.url` at build time
 (`scripts/build_ui.mjs`): without it, three's DRACOLoader threw at load and no 3D

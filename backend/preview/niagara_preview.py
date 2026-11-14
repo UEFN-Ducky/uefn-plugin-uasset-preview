@@ -20,6 +20,7 @@ from .paths_plugin import PANEL_UI_HTTP_PORT, PLUGIN_ID, cache_root
 from .thumbnail import embedded_thumbnail_png
 from .uasset import ReadError, load_package
 from .uasset.material import surface_look
+from .uasset.niagara_vm import compiled_script, particle_layout, store_raw, system_program
 from .uasset.package import Package
 from .uasset.payload import texture_png
 from .uasset.props import Raw, Ref, export_properties
@@ -157,6 +158,8 @@ def _look(path: str, resolve: Callable[[str], Optional[Path]]) -> dict[str, Any]
             out["icon"] = icon
     if look.get("color"):
         out["color"] = [round(float(c), 3) for c in look["color"][:3]]
+    if look.get("blend"):
+        out["blend"] = str(look["blend"]).replace("BLEND_", "")
     if look.get("how"):
         out["how"] = look["how"]
     if look.get("why"):
@@ -210,6 +213,21 @@ def _mesh_materials(mesh: str, resolve: Callable[[str], Optional[Path]]) -> list
     return [pkg.object_path(r.index) for r in refs if isinstance(r, Ref) and r.index < 0]
 
 
+def _sprite(renderer: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """How the panel draws a sprite renderer's particles: its texture, blend mode, flipbook grid."""
+    look = renderer.get("look") or {}
+    if renderer.get("type") != "Sprite" or not look.get("icon"):
+        return None
+    return {"icon": look["icon"], "blend": look.get("blend") or "Translucent", "grid": renderer.get("flipbook") or [1, 1]}
+
+
+def _system(pkg: Package, props: dict[str, Any]) -> Optional[dict[str, Any]]:
+    try:
+        return system_program(pkg, props)
+    except (ReadError, KeyError, IndexError, TypeError, struct.error):
+        return None
+
+
 def _summary(params: dict[str, Any]) -> list[list[str]]:
     lines = []
     for suffix, label, unit in _SUMMARY:
@@ -228,6 +246,40 @@ def _particle_color(params: dict[str, Any]) -> Optional[list[float]]:
     return value if isinstance(value, list) and len(value) == 4 else None
 
 
+def _simulation(pkg: Package, entry: dict[str, Any], data: dict[str, Any], params: dict[str, Any],
+                simulated: list, skipped: list, user: dict[str, bytes]) -> None:
+    """What ui/niagara_sim.js needs to run this emitter's particle scripts, or why it can't."""
+    name = entry["name"]
+    if entry.get("sim") == "GPU":
+        skipped.append({"name": name, "why": "it runs on the GPU (its shader is not saved in the file)"})
+        return
+    spawn_ref = (data.get("SpawnScriptProps") or {}).get("Script")
+    update_ref = (data.get("UpdateScriptProps") or {}).get("Script")
+    try:
+        spawn, update = compiled_script(pkg, spawn_ref, user=user), compiled_script(pkg, update_ref, user=user)
+        layout = particle_layout(pkg, update_ref) or particle_layout(pkg, spawn_ref)
+    except (ReadError, KeyError, IndexError, TypeError, struct.error) as exc:
+        skipped.append({"name": name, "why": f"its compiled scripts could not be read ({exc})"})
+        return
+    if spawn is None or update is None or not layout:
+        skipped.append({"name": name, "why": "no compiled particle scripts in the file"})
+        return
+    def number(key: str) -> float:
+        value = params.get(key)
+        return float(value) if isinstance(value, (int, float)) else 0.0
+    renderers = entry.get("renderers") or []
+    simulated.append({
+        "name": name, "spawn": spawn, "update": update, "layout": layout,
+        "rate": number("SpawnRate.SpawnRate"),
+        "burst": int(number("SpawnBurst_Instantaneous.Spawn Count")),
+        "burst_time": number("SpawnBurst_Instantaneous.Spawn Time"),
+        "loop": number("EmitterState.Loop Duration"),
+        "color": (entry.get("particle_color") or [1, 1, 1, 1])[:3],
+        "renderer": renderers[0]["type"] if renderers else "Sprite",
+        "sprite": _sprite(renderers[0]) if renderers else None,
+    })
+
+
 def build_niagara_preview(file: Path) -> dict[str, Any]:
     content = content_dir_of(file)
     if content is None:
@@ -240,7 +292,8 @@ def build_niagara_preview(file: Path) -> dict[str, Any]:
             return {"ok": False, "error": "not a Niagara System"}
         props = export_properties(pkg, system)
         params = rapid_parameters(pkg)
-        emitters = []
+        emitters, simulated, skipped = [], [], []
+        user = store_raw(pkg, props.get("ExposedParameters"), "User.")
         for handle in props.get("EmitterHandles") or []:
             if not isinstance(handle, dict):
                 continue
@@ -264,8 +317,11 @@ def build_niagara_preview(file: Path) -> dict[str, Any]:
                 if color:
                     entry["particle_color"] = color
                 entry["parameters"] = sorted([k, v] for k, v in emitter_params.items())
+                if entry["enabled"]:
+                    _simulation(pkg, entry, data, emitter_params, simulated, skipped, user)
             emitters.append(entry)
         out: dict[str, Any] = {"ok": True, "emitters": emitters,
+                               "simulation": {"emitters": simulated, "skipped": skipped, "system": _system(pkg, props)},
                                "system_parameters": sorted([k, v] for k, v in (params.get(pkg.package_name.rsplit("/", 1)[-1]) or {}).items())}
         thumb = embedded_thumbnail_png(file)
         if thumb:

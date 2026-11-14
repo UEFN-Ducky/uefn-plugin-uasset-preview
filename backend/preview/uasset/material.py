@@ -166,12 +166,12 @@ def surface_look(path: Path | str, resolve: Callable[[str], Optional[Path]],
             if _BASE_NAME.search(name):
                 return {"color": value[:3], "how": "parameter name"}
         return {"why": why}
+    found: dict[str, Any] = {"blend": graph.get("blend", "")}
     pin = next((graph["pins"][name] for name in pins if graph["pins"].get(name)), None)
     if not pin:
-        return {"why": "nothing is connected to its " + " or ".join(pins)}
+        return {"why": "nothing is connected to its " + " or ".join(pins), "blend": found["blend"]}
     if pin.get("use_constant") or not pin.get("node"):
-        return {"color": list(pin.get("constant") or [0.5, 0.5, 0.5])[:3], "how": "graph"}
-    found: dict[str, Any] = {}
+        return {"color": list(pin.get("constant") or [0.5, 0.5, 0.5])[:3], "how": "graph", "blend": found["blend"]}
     seen: set[str] = set()
 
     def visit(node_id: str, depth: int) -> None:
@@ -194,7 +194,7 @@ def surface_look(path: Path | str, resolve: Callable[[str], Optional[Path]],
                 visit(str(value["node"]), depth + 1)
 
     visit(str(pin["node"]), 0)
-    if found:
+    if "texture" in found or "color" in found:
         found["how"] = "graph"
         return found
-    return {"why": "its colour comes from nodes the preview does not follow"}
+    return {"why": "its colour comes from nodes the preview does not follow", "blend": found["blend"]}

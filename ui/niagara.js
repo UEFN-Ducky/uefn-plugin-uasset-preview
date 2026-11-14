@@ -43,9 +43,32 @@
     var emitters = data.emitters || [], on = emitters.filter(function (e) { return e.enabled; }).length;
     var text = el("div", "ns-intro");
     text.appendChild(el("div", "ns-title", "Niagara System · " + emitters.length + " emitter" + (emitters.length === 1 ? "" : "s") + (on !== emitters.length ? " (" + on + " on)" : "")));
-    text.appendChild(el("div", "ns-muted", "The particles are not simulated here: this is what the effect is made of, read from the file." + (data.thumbnail ? " The picture is the thumbnail UEFN saved." : "")));
+    var simulated = data.simulation && data.simulation.emitters && data.simulation.emitters.length;
+    text.appendChild(el("div", "ns-muted", (simulated ? "Below: the emitters this preview can run itself, then what the effect is made of, read from the file."
+      : "This is what the effect is made of, read from the file (no emitter could be run here).") + (data.thumbnail ? " The picture is the thumbnail UEFN saved." : "")));
     head.appendChild(text);
     host.appendChild(head);
+
+    // Experimental: the emitters' own compiled particle scripts, run here (ui/niagara_sim.js)
+    var sim = null, simData = data.simulation || {};
+    if (window.UassetNiagaraSim && simData.emitters && simData.emitters.length) {
+      var box = el("div", "ns-sim"), canvas = el("canvas", "ns-sim-canvas"), bar = el("div", "ns-sim-bar");
+      var pause = el("button", "", "Pause"), again = el("button", "", "Restart"), info = el("span", "ns-muted");
+      pause.type = again.type = "button";
+      bar.appendChild(pause); bar.appendChild(again); bar.appendChild(info);
+      box.appendChild(canvas); box.appendChild(bar);
+      host.appendChild(box);
+      sim = window.UassetNiagaraSim.create(canvas, simData.emitters, simData.system);
+      var playing = true;
+      pause.onclick = function () { playing = !playing; pause.textContent = playing ? "Pause" : "Play"; if (playing) sim.start(); else sim.stop(); };
+      again.onclick = function () { sim.restart(); };
+      var off = (simData.skipped || []).concat(sim.skipped);
+      info.textContent = "Experimental: " + sim.running + " emitter" + (sim.running === 1 ? "" : "s") + " run from their compiled scripts (sprites with their texture, other renderers as glowing points)"
+        + (off.length ? " · not shown: " + off.map(function (o) { return o.name + " (" + o.why + ")"; }).join("; ") : "");
+      if (sim.running) sim.start();
+    } else if ((simData.skipped || []).length) {
+      host.appendChild(el("div", "ns-muted", "Not simulated: " + simData.skipped.map(function (o) { return o.name + " (" + o.why + ")"; }).join("; ")));
+    }
 
     emitters.forEach(function (e) {
       var card = el("div", "ns-card" + (e.enabled ? "" : " off"));
@@ -78,7 +101,7 @@
       }
       host.appendChild(card);
     });
-    return { state: function () { return { emitters: emitters.length, thumbnail: !!data.thumbnail, cards: host.querySelectorAll(".ns-card").length }; } };
+    return { state: function () { return { emitters: emitters.length, thumbnail: !!data.thumbnail, cards: host.querySelectorAll(".ns-card").length, sim: sim ? sim.state() : null }; } };
   }
 
   window.UassetNiagara = { mount: mount };
