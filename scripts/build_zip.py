@@ -45,6 +45,7 @@ SKIP_NAMES = {
     ".pytest_cache",
     "scripts",
     "deploy",
+    "cache",
     ".gitignore",
     "README.md",
     "__pycache__",

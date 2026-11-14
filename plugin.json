@@ -21,6 +21,12 @@
         "title": "3D Model Preview",
         "icon": "assets/icon.png",
         "entry": "ui/model.html"
+      },
+      {
+        "id": "umg",
+        "title": "Widget Preview",
+        "icon": "assets/icon.png",
+        "entry": "ui/umg.html"
       }
     ],
     "editor.kinds": [

@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Widget Preview</title>
+  <style>
+    :root {
+      color-scheme: dark; /* dark scrollbars and form controls */
+      --bg: #121216; --surface: #17171c; --surface-2: #1d1d23; --surface-3: #25252d; --hover: #2b2b34;
+      --border: #282830; --border-strong: #3a3a45; --text: #ececf1; --muted: #8d8d99; --faint: #5f5f6b;
+      --accent: #7b8cff; --accent-soft: rgba(123,140,255,.14); --green: #5fd38d; --err: #ff7a85; --warn: #f2c94c;
+      --radius: 9px; --panel: 360px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+      font: 13px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
+    button, select, input, textarea { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    button:disabled { opacity: .4; cursor: default; }
+    [hidden] { display: none !important; }
+    .ic { display: inline-flex; align-items: center; justify-content: center; flex: none; }
+
+    /* ---- layout ------------------------------------------------------------ */
+    .app { display: flex; flex-direction: column; height: 100%; }
+    .main { flex: 1; min-height: 0; display: flex; }
+
+    /* ---- top bar: what this is, Play / Edit, a few actions ---------------- */
+    .topbar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; height: 52px; padding: 0 12px;
+      background: var(--surface); border-bottom: 1px solid var(--border); flex: none; }
+    .ident { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .ident-ic { width: 32px; height: 32px; border-radius: 9px; background: linear-gradient(145deg, #3a4a9a, #27306b);
+      color: #dfe4ff; display: inline-flex; align-items: center; justify-content: center; flex: none;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); }
+    .ident-text { min-width: 0; }
+    .ident h1 { margin: 0; font-size: 14px; font-weight: 650; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ident .sub { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .mode { display: inline-flex; padding: 3px; gap: 2px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; }
+    .mode button { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; color: var(--muted);
+      padding: 5px 14px; border-radius: 7px; font-weight: 550; }
+    .mode button:hover { color: var(--text); }
+    .mode button.on { background: var(--surface-3); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.4), inset 0 0 0 1px var(--border-strong); }
+    .mode #btn-edit.on { color: #ffd479; }
+    .top-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+    .icon-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; min-width: 30px; padding: 0 8px;
+      background: none; border: 1px solid transparent; border-radius: 8px; color: var(--muted); }
+    .icon-btn:hover { background: var(--hover); color: var(--text); }
+    .notice { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 999px;
+      background: rgba(242,201,76,.1); border: 1px solid rgba(242,201,76,.28); color: var(--warn); font-size: 12px; }
+    .notice:hover, .notice.on { background: rgba(242,201,76,.18); }
+    .banner { position: absolute; top: 58px; right: 12px; z-index: 20; width: min(440px, calc(100% - 24px)); padding: 12px 14px;
+      background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--radius); color: #e9dfb8;
+      font-size: 12.5px; line-height: 1.5; box-shadow: 0 12px 32px rgba(0,0,0,.5); }
+
+    /* ---- stage: the widget, a floating dock, a status pill ----------------- */
+    .stage { flex: 1; min-width: 0; position: relative; background: #1c1c1c; overflow: hidden; }
+    .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+    .err { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px); z-index: 5;
+      padding: 8px 14px; border-radius: 10px; background: rgba(60,18,24,.95); border: 1px solid rgba(255,122,133,.4);
+      color: var(--err); box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+    .dock { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 2px;
+      padding: 4px; background: rgba(23,23,28,.92); border: 1px solid var(--border-strong); border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.45); backdrop-filter: blur(8px); z-index: 4; }
+    .dock-res { display: inline-flex; align-items: center; gap: 6px; padding: 0 4px 0 8px; color: var(--muted); }
+    .dock select { background: none; border: 0; outline: none; color: var(--text); padding: 5px 2px; cursor: pointer; }
+    .dock select option { background: var(--surface-2); }
+    .dock select:disabled { color: var(--muted); cursor: default; }
+    .dock-sep { width: 1px; height: 20px; background: var(--border-strong); margin: 0 4px; }
+    .dock-btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 0; border-radius: 8px;
+      background: none; color: var(--muted); font-size: 12.5px; }
+    .dock-btn:hover { background: var(--hover); color: var(--text); }
+    .dock-btn.on { background: var(--accent-soft); color: var(--accent); }
+    .dock-btn.zoom-step { padding: 0 7px; }
+    .dock-btn.zoom-val { min-width: 54px; justify-content: center; padding: 0 6px; font-variant-numeric: tabular-nums; color: var(--text); }
+    .status { position: absolute; left: 12px; bottom: 14px; max-width: calc(50% - 150px); display: flex; align-items: center; gap: 7px;
+      padding: 6px 10px; border-radius: 9px; background: rgba(23,23,28,.85); border: 1px solid var(--border); color: var(--muted);
+      font-size: 12px; z-index: 3; }
+    .status #hover { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* ---- side panel: tabs and their panes ---------------------------------- */
+    .panel { width: var(--panel); flex: none; display: flex; flex-direction: column; min-height: 0;
+      background: var(--surface); border-left: 1px solid var(--border); }
+    .tabs { display: flex; gap: 2px; padding: 8px 8px 0; border-bottom: 1px solid var(--border); flex: none; }
+    .tabs button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 6px 9px;
+      background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted); font-weight: 550; }
+    .tabs button:hover { color: var(--text); }
+    .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+    .tabs .n { background: var(--surface-3); color: var(--muted); border-radius: 999px; padding: 0 6px; font-size: 10.5px; line-height: 16px; font-weight: 500; }
+    .tabs .n.new { background: var(--accent); color: #fff; }
+    .tabpane { display: none; flex: 1; min-height: 0; flex-direction: column; }
+    .panel.tab-main #pane-main, .panel.tab-bindings #bindpane, .panel.tab-log #pane-log { display: flex; }
+    .scroll { flex: 1; min-height: 0; overflow: auto; padding: 4px 12px 14px; }
+    .sec-head { display: flex; align-items: center; gap: 8px; margin: 14px 0 8px; }
+    .sec-head h2 { margin: 0; flex: 1; font-size: 11px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+    .ghost { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border-radius: 7px;
+      background: none; border: 1px solid var(--border); color: var(--muted); font-size: 11.5px; }
+    .ghost:hover { border-color: var(--border-strong); color: var(--text); background: var(--hover); }
+    .empty { color: var(--muted); padding: 18px 8px; text-align: center; border: 1px dashed var(--border); border-radius: var(--radius); }
+    .app.editing .play-only, .app:not(.editing) .edit-only { display: none !important; }
+
+    /* animations */
+    .anim-card { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 8px 8px 8px; margin-bottom: 6px;
+      background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); transition: border-color .12s, background .12s; }
+    .anim-card:hover { border-color: var(--border-strong); }
+    .anim-card.active { border-color: rgba(123,140,255,.55); background: linear-gradient(0deg, var(--accent-soft), var(--accent-soft)), var(--surface-2); }
+    .anim-play { width: 32px; height: 32px; border-radius: 50%; border: 0; display: inline-flex; align-items: center; justify-content: center;
+      background: var(--surface-3); color: var(--text); flex: none; }
+    .anim-play:hover, .anim-card.active .anim-play { background: var(--accent); color: #fff; }
+    .anim-main { flex: 1; min-width: 0; }
+    .anim-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .anim-meta { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+    .anim-card .icon-btn.on { color: var(--accent); background: var(--accent-soft); }
+    #scrub { flex-basis: 100%; width: 100%; margin: 2px 0 0; accent-color: var(--accent); }
+    /* pages of widget switchers */
+    .page-card { padding: 10px; margin-bottom: 6px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); }
+    .page-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-weight: 600; min-width: 0; }
+    .page-head .ic { color: #7dd3fc; }
+    .page-head span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .stepper { display: flex; align-items: center; gap: 8px; }
+    .stepper .dots { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; flex-wrap: wrap; }
+    .stepper .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--surface-3); border: 0; padding: 0; }
+    .stepper .dot.on { background: var(--accent); width: 18px; border-radius: 4px; }
+    .stepper .pos { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
+    .round { width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-3); color: var(--text);
+      display: inline-flex; align-items: center; justify-content: center; }
+    .round:hover { border-color: var(--border-strong); background: var(--hover); }
+
+    /* layers (edit mode) */
+    .app.editing #pane-main .scroll { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 0; }
+    .tree { max-height: 40%; min-height: 80px; overflow: auto; margin: 0 -4px; padding: 0 4px 6px; border-bottom: 1px solid var(--border); flex: none; }
+    .tree .row { display: flex; align-items: center; gap: 7px; height: 28px; padding-right: 6px; border-radius: 7px; cursor: pointer; white-space: nowrap; }
+    .tree .row:hover { background: var(--hover); }
+    .tree .row.sel { background: rgba(255,212,121,.12); box-shadow: inset 0 0 0 1px rgba(255,212,121,.35); }
+    .tree .row .ic { color: #7dd3fc; }
+    .tree .row .lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .tree .row .k { color: var(--faint); font-size: 10.5px; }
+    .tree .row.off .lbl, .tree .row.off .ic { color: var(--faint); }
+    .details { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .insp { flex: 1; min-height: 0; overflow: auto; padding: 0 2px 14px; }
+    .insp .who { display: flex; align-items: center; gap: 10px; padding: 10px; margin-bottom: 4px; background: var(--surface-2);
+      border: 1px solid var(--border); border-radius: var(--radius); }
+    .insp .who .ic { width: 30px; height: 30px; border-radius: 8px; background: rgba(125,211,252,.12); color: #7dd3fc; }
+    .insp .who b { display: block; font-weight: 650; word-break: break-all; }
+    .insp .who small { color: var(--muted); font-size: 11px; }
+    .insp .group { margin: 14px 0 2px; font-size: 10.5px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase; color: var(--faint); }
+    .insp label { display: block; color: var(--muted); font-size: 11.5px; margin: 8px 0 4px; }
+    .insp .row { display: flex; gap: 6px; align-items: center; }
+    .insp input[type=number], .insp input[type=text], .insp textarea, .insp select { width: 100%; min-width: 0; background: var(--bg);
+      border: 1px solid var(--border); border-radius: 7px; padding: 5px 8px; outline: none; }
+    .insp input:focus, .insp textarea:focus, .insp select:focus { border-color: var(--accent); }
+    .insp textarea { resize: vertical; min-height: 54px; }
+    .insp input[type=color] { width: 36px; height: 28px; padding: 2px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); flex: none; }
+    .insp input[type=range] { flex: 1; min-width: 0; accent-color: var(--accent); }
+    .insp .note { color: var(--muted); font-size: 11.5px; margin-top: 12px; line-height: 1.5; }
+    .insp .note.hint { padding: 14px; text-align: center; border: 1px dashed var(--border); border-radius: var(--radius); }
+
+    /* save bar (edit mode): always under the panes */
+    .savebar { display: flex; gap: 6px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--border); background: var(--surface-2); flex: none; }
+    .savebar .count { flex: 1; color: var(--muted); font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+    .savebar .count.dirty { color: #ffd479; }
+    .savebar .count.dirty::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #ffd479; }
+    .btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 8px;
+      background: var(--surface-3); border: 1px solid var(--border-strong); color: var(--text); font-weight: 550; }
+    .btn:hover:not(:disabled) { background: var(--hover); }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn.primary:hover:not(:disabled) { background: #8e9cff; }
+
+    /* event log */
+    #pane-log .sec-head { padding: 0 12px; }
+    #log { flex: 1; min-height: 0; margin: 0 12px 12px; padding: 10px 12px; overflow: auto; background: var(--bg);
+      border: 1px solid var(--border); border-radius: var(--radius); font: 11.5px/1.6 "Cascadia Code", ui-monospace, Consolas, monospace;
+      white-space: pre-wrap; color: #c5cbe0; }
+
+    /* View Bindings (ui/umg/bindings.js) */
+    #bindpane { overflow: hidden; }
+    .bhead { padding: 12px 12px 10px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--border); }
+    .bsearch { display: flex; align-items: center; gap: 7px; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 8px; padding: 6px 9px; color: var(--muted); }
+    .bsearch:focus-within { border-color: var(--accent); }
+    .bsearch input { flex: 1; min-width: 0; background: none; border: 0; outline: none; }
+    .bfilters { display: flex; gap: 5px; flex-wrap: wrap; }
+    .bfilter { padding: 2px 10px; border-radius: 999px; font-size: 11.5px; background: none; border: 1px solid var(--border); color: var(--muted); }
+    .bfilter:hover { color: var(--text); border-color: var(--border-strong); }
+    .bfilter.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+    .bfilter .n, .bgroup h3 .n { color: var(--muted); font-weight: 400; }
+    .blist { flex: 1; min-height: 0; overflow: auto; padding: 4px 12px 14px; }
+    .bgroup h3 { display: flex; align-items: center; gap: 7px; margin: 14px 2px 8px; font-size: 11px; font-weight: 650;
+      letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+    .bcard { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 11px; margin: 0 0 8px;
+      transition: border-color .12s, background .12s; }
+    .bcard:hover { border-color: var(--border-strong); background: #212128; }
+    .bcard.off { opacity: .5; }
+    .bcard .end { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .bcard .end > .ic { width: 30px; height: 30px; border-radius: 8px; background: var(--surface-3); }
+    .bcard .label { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+    .bcard .name { font-weight: 600; font-size: 12.5px; line-height: 1.3; overflow-wrap: break-word; }
+    .bcard .detail { color: var(--muted); font-size: 11px; line-height: 1.35; overflow-wrap: break-word; }
+    .bcard .link { display: flex; align-items: center; gap: 8px; min-height: 22px; padding-left: 7px; color: var(--faint); }
+    .chip { display: inline-flex; align-items: center; gap: 3px; flex: none; font-size: 10.5px; line-height: 16px; padding: 0 7px;
+      border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+    .chip.fn { color: #ffcf6b; border-color: #4d4127; background: rgba(255,207,107,.07); white-space: normal; }
+    .chip.warn { color: var(--warn); border-color: #5a5226; }
+    .ic.field { color: #c792ea; } .end > .ic.field { background: rgba(199,146,234,.14); }
+    .ic.kind { color: #7dd3fc; } .end > .ic.kind { background: rgba(125,211,252,.12); }
+    .ic.event { color: #ffcf6b; } .end > .ic.event { background: rgba(255,207,107,.13); }
+    .ic.cond { color: #f78c6c; } .end > .ic.cond { background: rgba(247,140,108,.13); }
+    .ic.anim { color: #9be9a8; } .end > .ic.anim { background: rgba(155,233,168,.12); }
+    .ic.verse { color: #82aaff; } .end > .ic.verse { background: rgba(130,170,255,.13); }
+    .bcard .try { margin-left: auto; width: 28px; height: 28px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center;
+      background: rgba(155,233,168,.1); border: 1px solid rgba(155,233,168,.25); color: #9be9a8; }
+    .bcard .try:hover { background: rgba(155,233,168,.2); }
+    .bnone { color: var(--muted); padding: 24px 6px; text-align: center; }
+
+    /* Shown small (the chat's hover card): only the widget itself. */
+    @media (max-width: 560px) and (max-height: 420px) {
+      .topbar, .panel, .dock, .status, .banner { display: none !important; }
+    }
+    @media (max-width: 760px) {
+      .main { flex-direction: column; }
+      .panel { width: auto; height: 46%; border-left: 0; border-top: 1px solid var(--border); }
+      .topbar { grid-template-columns: 1fr auto; } .top-actions { grid-column: 1 / -1; display: none; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="ident">
+      <span class="ident-ic" id="ident-ic"></span>
+      <div class="ident-text"><h1 id="title">…</h1><div class="sub" id="subtitle"></div></div>
+    </div>
+    <div class="mode">
+      <button type="button" id="mode-play" class="on" title="Use the widget: hover and click its buttons, play its animations">Play</button>
+      <button type="button" id="btn-edit" title="Select, move and change widgets, then save into the .uasset">Edit</button>
+    </div>
+    <div class="top-actions">
+      <button type="button" class="notice" id="notice" hidden></button>
+      <button type="button" class="icon-btn" id="btn-reload" title="Reload the widget from its file"></button>
+      <button type="button" class="icon-btn" id="btn-details" title="Asset details"></button>
+    </div>
+  </header>
+  <div id="banner" class="banner" hidden></div>
+  <div class="main">
+    <div class="stage">
+      <canvas id="stage"></canvas>
+      <div id="err" class="err" hidden></div>
+      <div class="status"><span id="status-ic"></span><span id="hover">Move the mouse over the widget; click its buttons.</span></div>
+      <div class="dock">
+        <label class="dock-res" title="Screen size"><span id="res-ic"></span>
+          <select id="res">
+            <option value="1920x1080">1920 × 1080</option>
+            <option value="1280x720">1280 × 720</option>
+            <option value="2560x1080">2560 × 1080 · ultrawide</option>
+            <option value="1280x800">1280 × 800 · Steam Deck</option>
+            <option value="2340x1080">2340 × 1080 · phone</option>
+          </select>
+        </label>
+        <span class="dock-sep"></span>
+        <button type="button" class="dock-btn" id="btn-hints" title="Outline every clickable button"></button>
+        <button type="button" class="dock-btn" id="btn-mute" title="Mute the widget's sounds"></button>
+        <span class="dock-sep"></span>
+        <button type="button" class="dock-btn zoom-step" id="zoom-out" title="Zoom out (Ctrl -)"></button>
+        <button type="button" class="dock-btn zoom-val" id="zoom-fit" title="Fit the screen in the panel (Ctrl 0). Wheel: zoom · right button, middle button or Space + drag: move the view · Ctrl 1: 100 %">100 %</button>
+        <button type="button" class="dock-btn zoom-step" id="zoom-in" title="Zoom in (Ctrl +)"></button>
+      </div>
+    </div>
+    <aside class="panel side tab-main">
+      <nav class="tabs" id="side-tabs">
+        <button type="button" data-tab="main" class="on"></button>
+        <button type="button" data-tab="bindings" title="The widget's View Bindings, as UEFN lists them"></button>
+        <button type="button" data-tab="log" title="What happened in the preview"></button>
+      </nav>
+      <div class="tabpane" id="pane-main">
+        <div class="scroll">
+          <div class="play-only">
+            <div class="sec-head"><h2>Animations</h2><button type="button" class="ghost" id="btn-stop" hidden title="Stop every animation and put the widget back as it was"></button></div>
+            <div id="anims"></div>
+            <input type="range" id="scrub" min="0" max="1000" value="0" hidden />
+            <div class="sec-head" id="pages-title" hidden><h2>Pages</h2></div>
+            <div id="pages" hidden></div>
+          </div>
+          <div class="sec-head edit-only" id="tree-title" hidden><h2>Layers</h2></div>
+          <div class="tree edit-only" id="tree" hidden></div>
+          <div class="details edit-only">
+            <div class="sec-head" id="insp-title" hidden><h2>Details</h2></div>
+            <div class="insp" id="insp" hidden></div>
+          </div>
+        </div>
+      </div>
+      <div class="tabpane" id="bindpane"></div>
+      <div class="tabpane" id="pane-log">
+        <div class="sec-head"><h2>Events</h2><button type="button" class="ghost" id="btn-clear-log">Clear</button></div>
+        <pre id="log"></pre>
+      </div>
+      <div class="savebar" id="savebar" hidden>
+        <span class="count" id="pending">No changes</span>
+        <button type="button" class="btn" id="btn-undo-save" title="Put back the file as it was before the last save" hidden>Undo save</button>
+        <button type="button" class="btn" id="btn-discard" disabled>Discard</button>
+        <button type="button" class="btn primary" id="btn-save" disabled>Save</button>
+        <button type="button" class="btn primary" id="btn-save-uefn" hidden title="UEFN saves its own version of this widget first, then these changes are applied on top">Save in UEFN, then apply</button>
+      </div>
+    </aside>
+  </div>
+</div>
+<script src="umg/material.js"></script>
+<script src="umg/engine.js"></script>
+<script src="umg/bindings.js"></script>
+<script>
+(function () {
+  var CHANNEL = "uefn-plugin-ui";
+  function call(method, params) {
+    var id = crypto.randomUUID();
+    return new Promise(function (resolve, reject) {
+      var timer = window.setTimeout(function () {
+        window.removeEventListener("message", onMsg);
+        reject(new Error("Timed out talking to host"));
+      }, 180000);
+      function onMsg(ev) {
+        var d = ev.data;
+        if (ev.source !== parent || !d || d.channel !== CHANNEL || d.id !== id || typeof d.ok !== "boolean") return;
+        window.clearTimeout(timer);
+        window.removeEventListener("message", onMsg);
+        if (d.ok) resolve(d.result); else reject(new Error(d.error || "bridge error"));
+      }
+      window.addEventListener("message", onMsg);
+      parent.postMessage({ channel: CHANNEL, id: id, method: method, params: params || {} }, "*");
+    });
+  }
+  function rpc(method, params) { return call("plugin.call", { method: method, params: params || {} }); }
+  function $(id) { return document.getElementById(id); }
+
+  var query = new URLSearchParams(location.search);
+  var filePath = query.get("file") || "";
+  var engine = null, scrubAnim = null, logLines = [], unread = 0;
+  var UI = window.UmgBindings; // icons (ui/umg/bindings.js)
+  function ico(name, cls) { return UI.icon(name, cls); }
+
+  function log(line) {
+    var t = new Date(), stamp = [t.getHours(), t.getMinutes(), t.getSeconds()].map(function (n) { return String(n).padStart(2, "0"); }).join(":");
+    logLines.push(stamp + "  " + line);
+    if (logLines.length > 200) logLines.shift();
+    $("log").textContent = logLines.join("\n");
+    $("log").scrollTop = $("log").scrollHeight;
+    if (sideTab !== "log") { unread++; labelTabs(); }
+  }
+  function showErr(msg) { $("err").hidden = !msg; $("err").textContent = msg || ""; }
+
+  /* The UEFN widget designer's backdrop (measured on a capture of it): flat grey, a faint lighter
+   * line every 16 units and a darker one every 160, the screen's edge dotted. */
+  function background(ctx, w, h) {
+    ctx.fillStyle = "#262626"; ctx.fillRect(0, 0, w, h);
+    var px = 1 / Math.max(1e-6, Math.hypot(ctx.getTransform().a, ctx.getTransform().b)); // one screen pixel
+    var step = 16;
+    if (step / px >= 8) { // too dense to read when zoomed far out: plain grey then, as UEFN does
+      for (var pass = 0; pass < 2; pass++) {
+        ctx.beginPath();
+        for (var i = 1; i * step < Math.max(w, h); i++) {
+          if ((i % 10 === 0) !== (pass === 1)) continue;
+          if (i * step < w) { ctx.moveTo(i * step, 0); ctx.lineTo(i * step, h); }
+          if (i * step < h) { ctx.moveTo(0, i * step); ctx.lineTo(w, i * step); }
+        }
+        ctx.lineWidth = px; ctx.strokeStyle = pass ? "#1d1d1d" : "#2b2b2b"; ctx.stroke();
+      }
+    }
+    ctx.setLineDash([4 * px, 3 * px]); ctx.lineWidth = px; ctx.strokeStyle = "#6a6a6a";
+    ctx.strokeRect(px / 2, px / 2, w - px, h - px); ctx.setLineDash([]);
+  }
+
+  function renderAnims(spec) {
+    var host = $("anims");
+    host.innerHTML = "";
+    $("btn-stop").hidden = !spec.animations.length;
+    if (!spec.animations.length) { host.innerHTML = '<div class="empty">This widget has no animations.</div>'; return; }
+    spec.animations.forEach(function (a) {
+      var row = el("div", { className: "anim-card" }, host); row.dataset.name = a.name;
+      var play = el("button", { type: "button", className: "anim-play", title: "Play once" }, row); play.appendChild(ico("play"));
+      var main = el("div", { className: "anim-main" }, row);
+      el("div", { className: "anim-name", text: a.name, title: a.name }, main);
+      var sounds = (a.audio || []).length;
+      el("div", { className: "anim-meta", text: (a.end - a.start).toFixed(2) + " s" + (sounds ? " · " + sounds + " sound" + (sounds > 1 ? "s" : "") : "") }, main);
+      var loop = el("button", { type: "button", className: "icon-btn", title: "Play in a loop" }, row); loop.appendChild(ico("loop"));
+      play.onclick = function () { start(a, false); };
+      loop.onclick = function () { start(a, true); };
+    });
+  }
+  /* Side panel tabs: the preview's controls (Animations, or Layers while editing), the widget's
+   * View Bindings (ui/umg/bindings.js), and the event log. The open tab is remembered. */
+  var sideTab = "main", bindingCount = 0;
+  try { var saved = localStorage.getItem("umg.sideTab"); if (saved === "bindings" || saved === "log") sideTab = saved; } catch (e) {}
+  function editing() { return $("btn-edit").classList.contains("on"); }
+  function labelTabs() {
+    var tabs = document.querySelectorAll("#side-tabs button");
+    if (!tabs.length) return;
+    tabs[0].replaceChildren(ico(editing() ? "layers" : "play"), document.createTextNode(editing() ? "Layers" : "Animations"));
+    var n = document.createElement("span"); n.className = "n"; n.textContent = String(bindingCount);
+    tabs[1].replaceChildren(ico("link"), document.createTextNode("Bindings"), n);
+    var parts = [ico("log"), document.createTextNode("Log")];
+    if (unread) { var u = document.createElement("span"); u.className = "n new"; u.textContent = unread > 99 ? "99+" : String(unread); parts.push(u); }
+    tabs[2].replaceChildren.apply(tabs[2], parts);
+  }
+  function showTab(tab) {
+    sideTab = tab;
+    var panel = document.querySelector(".panel");
+    ["main", "bindings", "log"].forEach(function (t) { panel.classList.toggle("tab-" + t, t === tab); });
+    Array.prototype.forEach.call(document.querySelectorAll("#side-tabs button"), function (b) { b.classList.toggle("on", b.dataset.tab === tab); });
+    try { localStorage.setItem("umg.sideTab", tab); } catch (e) {}
+    if (tab === "log") { unread = 0; $("log").scrollTop = $("log").scrollHeight; }
+    if (engine) engine.highlight(null);
+    labelTabs();
+  }
+  Array.prototype.forEach.call(document.querySelectorAll("#side-tabs button"), function (b) { b.onclick = function () { showTab(b.dataset.tab); }; });
+  function renderBindings(spec) {
+    var made = UI.create($("bindpane"), { engine: engine, spec: spec, onPlay: function (name) {
+      var anim = (spec.animations || []).filter(function (a) { return a.name === name; })[0];
+      if (anim) start(anim, false);
+    } });
+    bindingCount = made.total;
+    showTab(sideTab);
+  }
+  // Which page a switcher shows is decided by Verse in game; here you flip it by hand.
+  function renderPages() {
+    var host = $("pages"), list = engine.switchers();
+    host.innerHTML = ""; host.hidden = $("pages-title").hidden = !list.length;
+    list.forEach(function (s) {
+      var card = el("div", { className: "page-card" }, host);
+      var head = el("div", { className: "page-head", title: s.label }, card);
+      head.appendChild(ico("switcher")); el("span", { text: s.label }, head);
+      var step = el("div", { className: "stepper" }, card);
+      var prev = el("button", { type: "button", className: "round", title: "Previous page" }, step); prev.appendChild(ico("prev"));
+      var dots = el("div", { className: "dots" }, step);
+      var next = el("button", { type: "button", className: "round", title: "Next page" }, step); next.appendChild(ico("next"));
+      var pos = el("span", { className: "pos" }, step);
+      var show = function (i) {
+        s.active = engine.setSwitcher(s.id, i);
+        pos.textContent = (s.active + 1) + " / " + s.count;
+        Array.prototype.forEach.call(dots.children, function (d, k) { d.classList.toggle("on", k === s.active); });
+      };
+      for (var k = 0; k < s.count; k++) (function (k) {
+        var d = el("button", { type: "button", className: "dot", title: "Page " + (k + 1) }, dots); d.onclick = function () { show(k); };
+      })(k);
+      prev.onclick = function () { show(s.active - 1); }; next.onclick = function () { show(s.active + 1); };
+      show(s.active);
+    });
+  }
+  function markActive(name) {
+    Array.prototype.forEach.call(document.querySelectorAll(".anim-card"), function (el) { el.classList.toggle("active", el.dataset.name === name); });
+  }
+  function start(anim, loop) {
+    scrubAnim = anim; $("scrub").hidden = false; markActive(anim.name);
+    var card = document.querySelector('.anim-card[data-name="' + anim.name.replace(/"/g, '\\"') + '"]');
+    if (card) card.appendChild($("scrub"));
+    engine.play(anim.name, { loop: loop });
+    log("▶ " + anim.name + (loop ? " (loop)" : ""));
+    if (anim.audio.some(function (s) { return !(engine.spec.assets[s.sound] || {}).url; })) log("  (a sound of this animation is not available yet)");
+  }
+
+  function mediaBanner(res) {
+    var m = res.media || {}, parts = [];
+    if (m.images_thumbnail) parts.push(m.images_thumbnail + " image(s) shown from low-resolution thumbnails");
+    if (m.images_missing) parts.push(m.images_missing + " image(s) missing");
+    if (m.sounds_missing) parts.push(m.sounds_missing + " sound(s) not available");
+    var text = parts.join(" · ");
+    if (text) text += ". Supported textures use their original resolution; material effects may still use thumbnails.";
+    if (!res.oodle_available && !res.listener_online && (m.images_thumbnail || m.sounds_missing)) text += " Offline media decoding is unavailable in this Python environment.";
+    var report = engine && engine.materialReport ? engine.materialReport() : { failed: [] };
+    report.failed.forEach(function (f) { text += (text ? " " : "") + "Material " + f.name + " is shown from its thumbnail (" + f.error + ")."; });
+    (res.spec.warnings || []).forEach(function (w) { text += (text ? " " : "") + w; });
+    var count = parts.length + report.failed.length + (res.spec.warnings || []).length;
+    $("banner").textContent = text; $("banner").hidden = true;
+    $("notice").hidden = !text; $("notice").classList.remove("on");
+    $("notice").replaceChildren(ico("warn"), document.createTextNode(count + " note" + (count > 1 ? "s" : "")));
+    $("notice").title = text;
+  }
+
+  function mount(res) {
+    if (engine) engine.dispose();
+    var spec = res.spec;
+    $("title").textContent = spec.name;
+    var folder = String(spec.package || "").split("/").filter(Boolean).slice(1, -1).join("/");
+    $("subtitle").textContent = "Widget Blueprint" + (folder ? " · Content/" + folder : "");
+    if (!spec.root) { showErr("This Widget Blueprint has an empty tree."); return; }
+    engine = window.UmgEngine.create($("stage"), spec, { drawBackground: background });
+    applyRes();
+    engine.setHints($("btn-hints").classList.contains("on"));
+    renderBindings(spec);
+    engine.setMuted($("btn-mute").classList.contains("on"));
+    engine.on(function (type, d) {
+      if (type === "click") log("CLICK  " + d.label + (d.text ? '  "' + d.text + '"' : ""));
+      else if (type === "hover") log("hover  " + d.label);
+      else if (type === "call") log("  -> " + d["function"] + "  (Verse, not run here)  [" + d.widget + "]");
+      else if (type === "bound" && d.event.indexOf("Click") >= 0) log("  plays " + d.animation + "  [" + d.widget + "]");
+      else if (type === "select") { renderInspector(d.id ? d : null); markTree(d.id || 0); }
+      else if (type === "edit") {
+        redoStack = [];
+        d.changes.forEach(function (c) { undoStack.push({ id: d.node.id, field: c[0], before: c[2], group: undoGroup }); record(d.node, c[0], c[1]); });
+        undoGroup++; renderInspector(engine.selection());
+      }
+      else if (type === "open") { var area = document.querySelector("#insp textarea"); if (area) { area.focus(); area.select(); } }
+      else if (type === "view") $("zoom-fit").textContent = d.percent + " %";
+      else if (type === "pointer") $("hover").textContent = d.widget ? d.label + (d.label !== d.widget ? "  (" + d.widget + ")" : "") + "  ·  " + d.kind : idleStatus();
+      else if (type === "animation" && scrubAnim && d.time != null) {
+        var span = scrubAnim.end - scrubAnim.start;
+        $("scrub").value = span > 0 ? Math.round(1000 * (d.time - scrubAnim.start) / span) : 0;
+        if (d.state === "finished") log("■ " + d.name + " finished");
+      }
+    });
+    renderAnims(spec);
+    renderPages();
+    mediaBanner(res);
+    window.__umg = engine;
+    if (/(^|[#&])stats/.test(location.hash)) engine.toggleStats(); // dev: open with the performance overlay
+    engine.setEditMode(editing());
+    engine.setDesignTime(editing()); // editing shows everything, as UEFN's designer does
+    renderInspector(null); refreshSaveBar(); renderTree(); undoStack = []; redoStack = []; originals = {};
+  }
+
+  function applyRes() {
+    if (!engine) return;
+    var size = engine.spec.custom_size ? engine.spec.design_size : $("res").value.split("x").map(Number);
+    $("res").disabled = !!engine.spec.custom_size;
+    engine.setViewport(size[0], size[1]);
+  }
+
+  async function load() {
+    showErr("");
+    var res;
+    if (window.__offlineDemo) res = window.__offlineDemo;
+    else if (query.get("spec")) res = await (await fetch(query.get("spec"))).json(); // dev harness
+    else {
+      if (location.protocol === "file:" || parent === window) {
+        $("title").textContent = "Preview UMG";
+        $("btn-details").hidden = true;
+        throw new Error("Cette page s’ouvre depuis Ducky. Pour essayer la preview dans un navigateur, ouvre le fichier HTML autonome exporté (par exemple preview-boutique-hd.html).");
+      }
+      if (!filePath) { var info = await call("plugin.info", {}); filePath = (info && info.filePath) || ""; }
+      if (!filePath) throw new Error("No file path from host");
+      res = await rpc("load_umg_preview", { relative_path: filePath });
+    }
+    if (!res || res.ok === false) throw new Error((res && res.error) || "Could not read the widget");
+    mount(res);
+  }
+
+  $("res").onchange = applyRes;
+  function idleStatus() {
+    return editing() ? "Click to select · drag to move · handles to resize · wheel to zoom" : "Move the mouse over the widget; click its buttons.";
+  }
+  $("zoom-in").onclick = function () { if (engine) engine.zoom("in"); };
+  $("zoom-out").onclick = function () { if (engine) engine.zoom("out"); };
+  $("zoom-fit").onclick = function () { if (engine) engine.zoom("fit"); };
+  function dressDock() {
+    var muted = $("btn-mute").classList.contains("on");
+    $("btn-hints").replaceChildren(ico("pointer"), document.createTextNode("Buttons"));
+    $("btn-mute").replaceChildren(ico(muted ? "muted" : "sound"), document.createTextNode(muted ? "Muted" : "Sound"));
+    $("zoom-in").replaceChildren(ico("plus")); $("zoom-out").replaceChildren(ico("minus"));
+  }
+  $("btn-hints").onclick = function () { this.classList.toggle("on"); if (engine) engine.setHints(this.classList.contains("on")); };
+  $("btn-mute").onclick = function () { this.classList.toggle("on"); dressDock(); if (engine) engine.setMuted(this.classList.contains("on")); };
+  $("btn-stop").onclick = function () { if (!engine) return; engine.stop(); markActive(""); $("scrub").hidden = true; log("■ stopped and reset"); };
+  $("btn-clear-log").onclick = function () { logLines = []; $("log").textContent = ""; };
+  $("notice").onclick = function (ev) { ev.stopPropagation(); var open = $("banner").hidden; $("banner").hidden = !open; this.classList.toggle("on", open); };
+  document.addEventListener("click", function (ev) {
+    if (!$("banner").hidden && !$("banner").contains(ev.target)) { $("banner").hidden = true; $("notice").classList.remove("on"); }
+  });
+  // icons of the fixed controls
+  $("ident-ic").replaceChildren(UI.kindIcon("UserWidget", ""));
+  $("res-ic").replaceChildren(ico("monitor"));
+  $("status-ic").replaceChildren(ico("pointer"));
+  $("btn-reload").replaceChildren(ico("refresh"));
+  $("btn-details").replaceChildren(ico("info"));
+  $("mode-play").replaceChildren(ico("play"), document.createTextNode("Play"));
+  $("btn-edit").replaceChildren(ico("edit"), document.createTextNode("Edit"));
+  $("btn-stop").replaceChildren(ico("stop"), document.createTextNode("Stop"));
+  $("btn-clear-log").replaceChildren(ico("trash"), document.createTextNode("Clear"));
+  $("btn-undo-save").replaceChildren(ico("undo"), document.createTextNode("Undo save"));
+  $("btn-save").replaceChildren(ico("save"), document.createTextNode("Save"));
+  dressDock(); labelTabs();
+  // ---- editing -----------------------------------------------------------
+  // pending: "widget|field" -> {widget, kind, field, value}; the last value of a field wins.
+  var pending = {};
+  function toHex(c) { // linear colour -> #rrggbb as shown on screen
+    var ch = function (v) { v = Math.min(1, Math.max(0, v)); v = v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055; return ("0" + Math.round(v * 255).toString(16)).slice(-2); };
+    return "#" + ch(c[0]) + ch(c[1]) + ch(c[2]);
+  }
+  function fromHex(hex, alpha) {
+    var ch = function (i) { var v = parseInt(hex.substr(i, 2), 16) / 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    return [ch(1), ch(3), ch(5), alpha];
+  }
+  function record(node, field, value) {
+    var key = node.name + "|" + field, entry = undoStack[undoStack.length - 1];
+    if (!(key in originals) && entry && entry.field === field) originals[key] = entry.before;
+    pending[key] = { widget: node.name, kind: node.kind, field: field, value: value };
+    refreshSaveBar();
+  }
+  // undo: one entry per changed field, with the value it had; entries of one gesture share a group
+  var undoStack = [], redoStack = [], undoGroup = 1, originals = {};
+  function valueOf(desc, field) {
+    var parts = field.split("."), v = desc.fields[parts[0]];
+    v = parts.length > 1 ? v[+parts[1]] : v;
+    return Array.isArray(v) ? v.slice() : v;
+  }
+  function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+  function change(node, field, value) {
+    var before = valueOf(engine.describeNode(node.id), field), last = undoStack[undoStack.length - 1];
+    if (!engine.setField(node.id, field, value)) return;
+    redoStack = [];
+    // typing or dragging a slider keeps refining the same entry instead of adding one per keystroke
+    if (!(last && last.id === node.id && last.field === field && last.live)) undoStack.push({ id: node.id, field: field, before: before, group: undoGroup++, live: true });
+    record(node, field, value);
+  }
+  // undo moves a whole gesture (its entries share a group) to the redo stack, redo moves it back
+  function undo() { step(undoStack, redoStack, "before", "after"); }
+  function redo() { step(redoStack, undoStack, "after", "before"); }
+  function step(from, to, use, keep) {
+    if (!from.length) return;
+    var group = from[from.length - 1].group, moved = [];
+    while (from.length && from[from.length - 1].group === group) {
+      var u = from.pop(), desc = engine.describeNode(u.id), entry = { id: u.id, field: u.field, group: group };
+      entry[keep] = valueOf(desc, u.field); entry[use] = u[use];
+      engine.setField(u.id, u.field, u[use]);
+      var key = desc.name + "|" + u.field;
+      if (key in originals && same(originals[key], u[use])) delete pending[key];
+      else pending[key] = { widget: desc.name, kind: desc.kind, field: u.field, value: u[use] };
+      moved.unshift(entry);
+    }
+    Array.prototype.push.apply(to, moved);
+    refreshSaveBar(); renderInspector(engine.selection());
+  }
+  function renderTree() {
+    var host = $("tree"), editing = $("btn-edit").classList.contains("on");
+    host.hidden = $("tree-title").hidden = !editing; host.innerHTML = "";
+    if (!editing || !engine) return;
+    engine.tree().forEach(function (n) {
+      var row = el("div", { className: "row" + (n.hidden ? " off" : ""), title: n.label + " (" + n.kind + ")" + (n.hidden ? ", hidden" : "") }, host);
+      row.style.paddingLeft = (6 + n.depth * 14) + "px"; row.dataset.id = n.id;
+      row.appendChild(UI.kindIcon(n.kind, ""));
+      el("span", { className: "lbl", text: n.label }, row);
+      if (n.hidden) row.appendChild(ico("eyeOff"));
+      el("span", { className: "k", text: n.kind }, row);
+      row.onclick = function () { engine.select(n.id); };
+    });
+  }
+  function markTree(id) {
+    Array.prototype.forEach.call(document.querySelectorAll("#tree .row"), function (row) {
+      var on = +row.dataset.id === id; row.classList.toggle("sel", on);
+      if (on) row.scrollIntoView({ block: "nearest" });
+    });
+  }
+  window.addEventListener("keydown", function (ev) {
+    if (engine && ev.shiftKey && (ev.key === "F" || ev.key === "f") && !/^(INPUT|TEXTAREA|SELECT)$/.test((ev.target && ev.target.tagName) || "")) {
+      engine.toggleStats(); return; // performance overlay
+    }
+    var typing = /^(INPUT|TEXTAREA|SELECT)$/.test((ev.target && ev.target.tagName) || ""), ctrl = ev.ctrlKey || ev.metaKey;
+    var zoomKey = { "0": "fit", "1": "actual", "=": "in", "+": "in", "-": "out" }[ev.key];
+    if (engine && ctrl && zoomKey && !typing) { ev.preventDefault(); engine.zoom(zoomKey); return; }
+    if (!engine || !$("btn-edit").classList.contains("on")) return;
+    var key = ev.key.toLowerCase();
+    if (ctrl && !typing && (key === "y" || (key === "z" && ev.shiftKey))) { ev.preventDefault(); redo(); return; }
+    if (ctrl && !typing && key === "z") { ev.preventDefault(); undo(); return; }
+    if (ev.key === "Escape" && !typing) { engine.select(0); return; }
+    var move = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[ev.key], sel = engine.selection();
+    if (!move || typing || !sel) return;
+    ev.preventDefault();
+    var step = ev.shiftKey ? 10 : 1;
+    if (sel.fields.offsets) {
+      if (move[0]) change(sel, "offsets.0", sel.fields.offsets[0] + move[0] * step);
+      if (move[1]) change(sel, "offsets.1", sel.fields.offsets[1] + move[1] * step);
+    } else change(sel, "translation", [sel.fields.translation[0] + move[0] * step, sel.fields.translation[1] + move[1] * step]);
+    undoStack[undoStack.length - 1].live = false;
+    renderInspector(engine.selection());
+  });
+  function refreshSaveBar() {
+    var n = Object.keys(pending).length, editing = $("btn-edit").classList.contains("on");
+    $("savebar").hidden = !editing;
+    $("pending").textContent = n ? n + " unsaved change" + (n > 1 ? "s" : "") : "No changes";
+    $("pending").classList.toggle("dirty", !!n);
+    $("btn-save").disabled = !n || !!window.__offlineDemo; $("btn-discard").disabled = !n;
+    if (window.__offlineDemo && n) $("pending").textContent += " (this example page cannot save)";
+  }
+  function el(tag, attrs, parent) {
+    var e = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (k) { if (k === "text") e.textContent = attrs[k]; else e[k] = attrs[k]; });
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function numberRow(host, label, values, step, onChange) {
+    el("label", { text: label }, host);
+    var row = el("div", { className: "row" }, host);
+    values.forEach(function (v, i) {
+      var input = el("input", { type: "number", step: step, value: Math.round(v * 1000) / 1000 }, row);
+      input.onchange = function () { var x = parseFloat(input.value); if (isFinite(x)) onChange(i, x); };
+    });
+  }
+  function colorRow(host, label, color, onChange) {
+    el("label", { text: label }, host);
+    var row = el("div", { className: "row" }, host);
+    var pick = el("input", { type: "color", value: toHex(color) }, row);
+    var alpha = el("input", { type: "range", min: 0, max: 1, step: 0.01, value: color[3], title: "Opacity" }, row);
+    var send = function () { onChange(fromHex(pick.value, parseFloat(alpha.value))); };
+    pick.oninput = send; alpha.oninput = send;
+  }
+  function renderInspector(node) {
+    var host = $("insp"), editing = $("btn-edit").classList.contains("on");
+    host.innerHTML = ""; host.hidden = $("insp-title").hidden = !editing;
+    if (!editing) return;
+    if (undoStack.length) undoStack[undoStack.length - 1].live = false; // a new selection starts a new undo step
+    if (!node) { el("div", { className: "note hint", text: "" }, host).append(
+      "Click a widget in the preview or in the layers.", el("br"),
+      "Drag it to move it (Shift: in a straight line), pull a handle to resize it (Shift: keep proportions, Alt: from the centre). ",
+      "Pink lines show it lining up with the others; hold Ctrl to place it freely.", el("br"),
+      "Arrow keys nudge (Shift: 10) · Ctrl+Z undo · Ctrl+Y redo · Esc deselect · wheel zoom · right button drags the view."); return; }
+    var f = node.fields;
+    var who = el("div", { className: "who" }, host);
+    who.appendChild(UI.kindIcon(node.kind, ""));
+    var whoText = el("div", {}, who);
+    el("b", { text: node.label }, whoText);
+    el("small", { text: node.kind + (node.className !== node.kind ? " · " + node.className : "") }, whoText);
+    if (f.text != null) {
+      el("div", { className: "group", text: "Text" }, host);
+      el("label", { text: "Text" }, host);
+      var area = el("textarea", { value: f.text }, host);
+      area.oninput = function () { change(node, "text", area.value); };
+      numberRow(host, "Font size", [f.font_size], 1, function (i, v) { change(node, "font_size", v); });
+      colorRow(host, "Text colour", f.text_color, function (c) { change(node, "text_color", c); });
+      colorRow(host, "Shadow colour", f.shadow_color, function (c) { change(node, "shadow_color", c); });
+    }
+    if (f.tint) {
+      el("div", { className: "group", text: "Image" }, host);
+      el("label", { text: "Picture" }, host);
+      var select = el("select", {}, host);
+      el("option", { value: "", text: "(none)" }, select);
+      engine.images().forEach(function (img) { el("option", { value: img.key, text: img.name + (img.kind === "material" ? " (material)" : "") }, select); });
+      select.value = f.resource || "";
+      select.onchange = function () { if (select.value) change(node, "resource", select.value); };
+      // any other image of the project: search by name, then pick (it is added to the widget on save)
+      var search = el("input", { type: "text", placeholder: "Search another image in the project…" }, host);
+      var results = el("select", { hidden: true }, host);
+      var timer = 0;
+      search.oninput = function () {
+        clearTimeout(timer);
+        if (window.__offlineDemo || search.value.trim().length < 2) { results.hidden = true; return; }
+        timer = setTimeout(function () {
+          rpc("find_umg_images", { relative_path: filePath, query: search.value.trim() }).then(function (res) {
+            results.innerHTML = ""; results.hidden = false;
+            el("option", { value: "", text: ((res && res.images) || []).length + " found — pick one" }, results);
+            ((res && res.images) || []).forEach(function (img) { el("option", { value: img.key, text: img.name + "  (" + img.folder + ")" }, results); });
+          }).catch(function (e) { showErr(e.message || String(e)); });
+        }, 350);
+      };
+      results.onchange = function () {
+        if (!results.value) return;
+        // shown from its thumbnail-less placeholder until the next reload; the saved file gets the real reference
+        change(node, "resource", results.value);
+        log("image -> " + results.options[results.selectedIndex].text + " (visible after Save)");
+      };
+      colorRow(host, "Tint", f.tint, function (c) { change(node, "tint", c); });
+      colorRow(host, "Colour and opacity", f.image_color, function (c) { change(node, "image_color", c); });
+      numberRow(host, "Image size (W, H)", f.image_size, 1, function (i, v) { f.image_size[i] = v; change(node, "image_size", f.image_size.slice()); });
+    }
+    el("div", { className: "group", text: "Layout" }, host);
+    if (f.offsets) {
+      numberRow(host, "Position (X, Y)", f.offsets.slice(0, 2), 1, function (i, v) { change(node, "offsets." + i, v); });
+      numberRow(host, "Size (W, H) or right/bottom margin", f.offsets.slice(2, 4), 1, function (i, v) { change(node, "offsets." + (i + 2), v); });
+      numberRow(host, "Alignment (0-1)", f.alignment, 0.05, function (i, v) { f.alignment[i] = v; change(node, "alignment", f.alignment.slice()); });
+    } else if (f.padding) {
+      numberRow(host, "Padding (left, top, right, bottom)", f.padding, 1, function (i, v) { change(node, "padding." + i, v); });
+    }
+    el("div", { className: "group", text: "Appearance" }, host);
+    numberRow(host, "Opacity (0-1)", [f.opacity], 0.05, function (i, v) { change(node, "opacity", Math.min(1, Math.max(0, v))); });
+    numberRow(host, "Offset (X, Y)", f.translation, 1, function (i, v) { f.translation[i] = v; change(node, "translation", f.translation.slice()); });
+    numberRow(host, "Scale (X, Y)", f.scale, 0.05, function (i, v) { f.scale[i] = v; change(node, "scale", f.scale.slice()); });
+    numberRow(host, "Rotation (degrees)", [f.angle], 1, function (i, v) { change(node, "angle", v); });
+    el("div", { className: "note", text: "Material parameters are not editable here yet." }, host);
+  }
+  function refreshUndo() {
+    if (window.__offlineDemo || !filePath) return;
+    rpc("umg_backup_count", { relative_path: filePath }).then(function (r) { $("btn-undo-save").hidden = !(r && r.count); }).catch(function () {});
+  }
+  function setEditing(on) {
+    if (on === editing()) return;
+    $("btn-edit").classList.toggle("on", on); $("mode-play").classList.toggle("on", !on);
+    if (engine) { engine.setEditMode(on); engine.setDesignTime(on); }
+    document.querySelector(".app").classList.toggle("editing", on);
+    if (on && sideTab === "log") showTab("main"); else labelTabs();
+    renderInspector(null); refreshSaveBar(); refreshUndo(); renderTree();
+    $("hover").textContent = idleStatus();
+  }
+  $("btn-edit").onclick = function () { setEditing(true); };
+  $("mode-play").onclick = function () { setEditing(false); };
+  $("btn-discard").onclick = function () { pending = {}; load().catch(function (e) { showErr(e.message || String(e)); }); };
+  function save(saveInUefnFirst) {
+    var edits = Object.keys(pending).map(function (k) { return pending[k]; });
+    $("btn-save").disabled = true; $("btn-save-uefn").hidden = true; showErr("");
+    rpc("save_umg_edits", { relative_path: filePath, edits: edits, save_in_uefn_first: !!saveInUefnFirst }).then(function (res) {
+      if (res && res.dirty_in_uefn) $("btn-save-uefn").hidden = false;
+      if (!res || res.ok === false) throw new Error((res && res.error) || "Save failed");
+      if (res.saved_in_uefn) log("  UEFN saved its version first");
+      pending = {};
+      log("SAVED  " + edits.length + " change(s) into the .uasset" + (res.unchanged ? " (nothing differed)" : ""));
+      if (res.warning) log("  " + res.warning);
+      if (res.note) log("  " + res.note);
+      return load();
+    }).then(refreshUndo).catch(function (e) { showErr(e.message || String(e)); refreshSaveBar(); });
+  }
+  $("btn-save").onclick = function () { save(false); };
+  $("btn-save-uefn").onclick = function () { save(true); };
+  $("btn-undo-save").onclick = function () {
+    rpc("restore_umg_backup", { relative_path: filePath }).then(function (res) {
+      if (!res || res.ok === false) throw new Error((res && res.error) || "Restore failed");
+      pending = {}; log("RESTORED the file from before the last save");
+      return load();
+    }).then(refreshUndo).catch(function (e) { showErr(e.message || String(e)); });
+  };
+
+  $("btn-reload").onclick = function () { load().catch(function (e) { showErr(e.message || String(e)); }); };
+  $("btn-details").onclick = function () { location.href = "asset.html?details=1&file=" + encodeURIComponent(filePath); };
+  $("scrub").oninput = function () {
+    if (!engine || !scrubAnim) return;
+    engine.seek(scrubAnim.name, scrubAnim.start + (scrubAnim.end - scrubAnim.start) * this.value / 1000);
+  };
+  load().catch(function (e) { showErr(e.message || String(e)); });
+})();
+</script>
+</body>
+</html>

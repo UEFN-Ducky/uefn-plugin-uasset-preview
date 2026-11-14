@@ -20,6 +20,11 @@ await esbuild.build({
   minify: true,
   sourcemap: false,
   logLevel: "info",
+  // An IIFE bundle has no import.meta: esbuild would leave {} and three's DRACOLoader then
+  // runs new URL("../libs/draco/...", undefined) at load, which throws and leaves
+  // window.UassetViewer undefined (every 3D preview broken since three 0.187).
+  define: { "import.meta.url": "__viewerBundleUrl" },
+  banner: { js: "var __viewerBundleUrl = (document.currentScript && document.currentScript.src) || location.href;" },
 });
 
 mkdirSync(dracoDest, { recursive: true });
