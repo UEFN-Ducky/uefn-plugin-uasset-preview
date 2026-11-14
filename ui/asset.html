@@ -42,6 +42,13 @@
     .snd-list li button { padding: 1px 7px; }
     .snd-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .snd-meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .mesh-info { padding: 8px 12px; border-top: 1px solid var(--border); background: var(--surface); font-size: 12px; max-height: 34vh; overflow: auto; }
+    .mesh-info dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0 0 6px; }
+    .mesh-info dt { color: var(--muted); }
+    .mesh-info dd { margin: 0; }
+    .mesh-info ul { margin: 0; padding-left: 16px; }
+    .mesh-info .why { color: var(--muted); }
+    .swatch { display: inline-block; width: 10px; height: 10px; border: 1px solid var(--border); vertical-align: -1px; margin-right: 4px; }
     .note { padding: 6px 12px; color: var(--muted); border-bottom: 1px solid var(--border); font-size: 12px; }
     .banner { padding: 8px 12px; background: #2a2a14; color: #e6d27a; border-bottom: 1px solid var(--border); }
     .err { color: var(--err); padding: 8px 12px; }
@@ -61,7 +68,7 @@
       <button type="button" id="btn-open">Open in UEFN</button>
       <button type="button" id="btn-copy">Copy asset path</button>
       <button type="button" id="btn-umg" hidden>Interactive preview</button>
-      <button type="button" id="btn-mesh" hidden>Load 3D preview</button>
+      <button type="button" id="btn-mesh" hidden>UEFN FBX export</button>
       <button type="button" id="btn-live" hidden>Live material</button>
       <button type="button" id="btn-mat" hidden>Load material preview</button>
       <button type="button" id="btn-tex" hidden>Load texture preview</button>
@@ -86,6 +93,7 @@
       </div>
     </div>
   </div>
+  <div id="mesh-info" class="mesh-info" hidden></div>
   <details id="tree-details" open hidden>
     <summary>Widget tree</summary>
     <pre id="tree"></pre>
@@ -333,6 +341,39 @@
     document.getElementById("thumb").src = url || "";
   }
 
+  // ---- StaticMesh read from the .uasset, as a GLB (backend/preview/mesh_preview.py)
+  function srgbHex(c) {
+    function ch(v) { v = Math.max(0, Math.min(1, v)); v = v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055; return ("0" + Math.round(v * 255).toString(16)).slice(-2); }
+    return "#" + ch(c[0]) + ch(c[1]) + ch(c[2]);
+  }
+  function renderMeshInfo(res) {
+    var box = document.getElementById("mesh-info"), info = res.info || {}, rows = [];
+    function row(k, v) { if (v !== undefined && v !== null && v !== "") rows.push("<dt>" + escapeHtml(k) + "</dt><dd>" + v + "</dd>"); }
+    if (info.size_cm) row("Size", info.size_cm.map(function (v) { return v.toLocaleString(); }).join(" \u00d7 ") + " cm");
+    if (info.triangles != null) row("Triangles", info.triangles.toLocaleString() + " (source, LOD 0)");
+    if (info.vertices != null) row("Vertices", info.vertices.toLocaleString());
+    row("LODs", info.lods);
+    row("Nanite", info.nanite ? "on" : "off");
+    row("Collision", info.custom_collision ? "custom" : "default" + (info.lod_for_collision != null ? " (LOD " + info.lod_for_collision + ")" : ""));
+    if (info.uv_channels != null) row("UV channels", info.uv_channels);
+    var mats = (res.slots || []).map(function (s) {
+      var look = s.textured ? "texture " + escapeHtml(s.texture || "") : s.color ? '<span class="swatch" style="background:' + srgbHex(s.color) + '"></span>colour' : "";
+      var how = s.how === "parameter name" ? " (guessed from the parameter name)" : "";
+      var why = s.why ? ' <span class="why">\u2014 grey: ' + escapeHtml(s.why) + "</span>" : "";
+      return "<li><strong>" + escapeHtml(s.slot || "?") + "</strong>: " + escapeHtml(s.material || "no material") + (look ? " \u2014 " + look + how : "") + why + "</li>";
+    });
+    box.innerHTML = "<dl>" + rows.join("") + "</dl>" + (mats.length ? "<div>Materials (base colour only):</div><ul>" + mats.join("") + "</ul>" : "");
+    box.hidden = false;
+  }
+  async function startMesh() {
+    var res = await rpc("load_mesh_preview", { relative_path: filePath });
+    if (res && res.info) renderMeshInfo(res);
+    if (!res || !res.ok) return (res && res.error) || "the mesh could not be read";
+    await showMesh(res);
+    window.__meshPreview = { ok: true, info: res.info, slots: res.slots };
+    return "";
+  }
+
   async function showMesh(media) {
     document.getElementById("status").hidden = true;
     document.getElementById("img-wrap").hidden = true;
@@ -399,8 +440,14 @@
       liveShown = !whySound;
       noteMaterial(whySound ? "Sound preview unavailable: " + whySound + "." : "");
     }
+    if (result && result.preview_kind === "static_mesh") {
+      var whyMesh = "";
+      try { whyMesh = await startMesh(); } catch (e) { whyMesh = e.message || String(e); }
+      liveShown = !whyMesh;
+      noteMaterial(whyMesh ? "3D preview without UEFN unavailable: " + whyMesh + "." : "");
+    }
     if (liveShown) {
-      // drawn live / sound player
+      // drawn live / sound player / mesh
     } else if (result && result.preview_url && (result.mode === "texture" || result.mode === "material" || result.mode === "image" || result.mode === "badge" || result.mode === "asset" || result.mode === "verse")) {
       showImage(result.preview_url);
     } else {
@@ -410,7 +457,7 @@
     if (!result || result.listener_online === false || result.fallback) await loadHex();
 
     // Auto-load mesh / material / texture when kind is clear.
-    if (result && result.supports_mesh_preview && result.listener_online) {
+    if (result && result.supports_mesh_preview && result.listener_online && !liveShown) {
       document.getElementById("btn-mesh").click();
     } else if (result && result.supports_material_preview && result.listener_online && !liveShown) {
       document.getElementById("btn-mat").click();
