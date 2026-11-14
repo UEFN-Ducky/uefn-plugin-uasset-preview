@@ -49,6 +49,26 @@
     .mesh-info ul { margin: 0; padding-left: 16px; }
     .mesh-info .why { color: var(--muted); }
     .swatch { display: inline-block; width: 10px; height: 10px; border: 1px solid var(--border); vertical-align: -1px; margin-right: 4px; }
+    .ns-wrap { flex: 1; min-height: 0; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+    .ns-head { display: flex; gap: 12px; align-items: center; }
+    .ns-thumb { width: 128px; height: 128px; object-fit: contain; border: 1px solid var(--border); border-radius: 4px; background: #000; }
+    .ns-title { font-weight: 600; }
+    .ns-muted { color: var(--muted); }
+    .ns-card { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; background: var(--surface); }
+    .ns-card.off { opacity: 0.55; }
+    .ns-card-title { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    .ns-badge { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; }
+    .ns-renderer { margin-top: 2px; }
+    .ns-type { color: var(--accent); }
+    .ns-look { display: flex; align-items: center; gap: 6px; margin: 2px 0 2px 12px; font-size: 12px; flex-wrap: wrap; }
+    .ns-icon { width: 40px; height: 40px; object-fit: contain; background: #000; border: 1px solid var(--border); border-radius: 3px; }
+    .ns-swatch { display: inline-block; width: 12px; height: 12px; border: 1px solid var(--border); border-radius: 2px; flex: none; }
+    .ns-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+    .ns-chip { font-size: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 1px 8px; }
+    .ns-params { margin-top: 6px; border: 0; background: none; }
+    .ns-params summary { padding: 2px 0; font-size: 12px; }
+    .ns-params table { font-size: 11px; border-collapse: collapse; }
+    .ns-params td { padding: 1px 10px 1px 0; vertical-align: top; }
     .note { padding: 6px 12px; color: var(--muted); border-bottom: 1px solid var(--border); font-size: 12px; }
     .banner { padding: 8px 12px; background: #2a2a14; color: #e6d27a; border-bottom: 1px solid var(--border); }
     .err { color: var(--err); padding: 8px 12px; }
@@ -82,6 +102,7 @@
     <div class="img-wrap" id="img-wrap" hidden><img id="thumb" alt="preview" /></div>
     <div id="viewer" hidden></div>
     <div class="snd-wrap" id="snd-wrap" hidden></div>
+    <div class="ns-wrap" id="ns-wrap" hidden></div>
     <div class="mat-wrap" id="mat-wrap" hidden>
       <canvas id="mat"></canvas>
       <div class="mat-bar">
@@ -106,6 +127,7 @@
 <script src="viewer.bundle.js"></script>
 <script src="umg/material.js"></script>
 <script src="sound.js"></script>
+<script src="niagara.js"></script>
 <script>
 (function () {
   var CHANNEL = "uefn-plugin-ui";
@@ -329,6 +351,21 @@
   }
   window.__soundPreview = function () { return sound ? sound.state() : null; };
 
+  // ---- Niagara: what the effect is made of (ui/niagara.js)
+  var niagara = null;
+  async function startNiagara() {
+    if (!window.UassetNiagara) return "the effect viewer (niagara.js) is missing";
+    var res = await rpc("load_niagara_preview", { relative_path: filePath });
+    if (!res || !res.ok) return (res && res.error) || "the effect could not be read";
+    document.getElementById("status").hidden = true;
+    document.getElementById("img-wrap").hidden = true;
+    var host = document.getElementById("ns-wrap");
+    host.hidden = false;
+    niagara = window.UassetNiagara.mount(host, res);
+    return "";
+  }
+  window.__niagaraPreview = function () { return niagara ? niagara.state() : null; };
+
   function showImage(url) {
     stopLiveMaterial();
     if (sound) { sound.stop(); document.getElementById("snd-wrap").hidden = true; }
@@ -439,6 +476,12 @@
       try { whySound = await startSound(); } catch (e) { whySound = e.message || String(e); }
       liveShown = !whySound;
       noteMaterial(whySound ? "Sound preview unavailable: " + whySound + "." : "");
+    }
+    if (result && result.preview_kind === "niagara") {
+      var whyNs = "";
+      try { whyNs = await startNiagara(); } catch (e) { whyNs = e.message || String(e); }
+      liveShown = !whyNs;
+      noteMaterial(whyNs ? "Effect details unavailable: " + whyNs + "." : "");
     }
     if (result && result.preview_kind === "static_mesh") {
       var whyMesh = "";

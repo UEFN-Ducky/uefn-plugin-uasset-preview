@@ -145,8 +145,12 @@ def material_graph(path: Path | str, resolve: Callable[[str], Optional[Path]]) -
 _BASE_NAME = re.compile(r"base ?colou?r|diffuse|albedo|^base ?texture$|^colou?r$", re.IGNORECASE)
 
 
-def surface_look(path: Path | str, resolve: Callable[[str], Optional[Path]]) -> dict[str, Any]:
+def surface_look(path: Path | str, resolve: Callable[[str], Optional[Path]],
+                 pins: tuple[str, ...] = ("BaseColor",)) -> dict[str, Any]:
     """Best guess at a surface material's base colour, for a mesh preview.
+
+    ``pins``: material outputs tried in order (a particle's unlit material colours
+    EmissiveColor, not BaseColor).
 
     ``{"texture": object path}`` and/or ``{"color": [r, g, b]}`` (linear), plus ``how``:
     "graph" when found by following the BaseColor input, "parameter name" when the
@@ -162,9 +166,9 @@ def surface_look(path: Path | str, resolve: Callable[[str], Optional[Path]]) -> 
             if _BASE_NAME.search(name):
                 return {"color": value[:3], "how": "parameter name"}
         return {"why": why}
-    pin = graph["pins"].get("BaseColor")
+    pin = next((graph["pins"][name] for name in pins if graph["pins"].get(name)), None)
     if not pin:
-        return {"why": "nothing is connected to its Base Color"}
+        return {"why": "nothing is connected to its " + " or ".join(pins)}
     if pin.get("use_constant") or not pin.get("node"):
         return {"color": list(pin.get("constant") or [0.5, 0.5, 0.5])[:3], "how": "graph"}
     found: dict[str, Any] = {}
@@ -193,4 +197,4 @@ def surface_look(path: Path | str, resolve: Callable[[str], Optional[Path]]) -> 
     if found:
         found["how"] = "graph"
         return found
-    return {"why": "its Base Color comes from nodes the preview does not follow"}
+    return {"why": "its colour comes from nodes the preview does not follow"}

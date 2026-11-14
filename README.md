@@ -110,6 +110,35 @@ The HTML embeds the same renderer and decoded media as the plugin. Open it in a
 browser; no local server is needed. It contains project artwork and should stay
 local. `Reload` reloads this snapshot; rerun the exporter after changing assets.
 
+## Sounds, meshes and effects
+
+Opening one of these assets shows more than its thumbnail:
+
+- **Sound Wave / Sound Cue** (`backend/preview/sound_preview.py`, `ui/sound.js`): waveform
+  and playback; a cue plays the way UEFN does (Random by weight, Modulator volume and
+  pitch, Mixer, Concatenator, Delay) and lists each wave, playable alone. The samples
+  come from UEFN's own WAV export (asked only when UEFN has this island open), cached
+  under the file's date and size, so a sound heard once plays later with UEFN closed.
+  The .uasset payload is never decoded for audio: compared byte for byte with UEFN's
+  export, pyooz gets these streams wrong (a hiss, or something that looks like sound).
+- **Static Mesh** (`backend/preview/mesh_preview.py`, `uasset/mesh_description.py`): 3D
+  from the source geometry stored in the .uasset (no UEFN), as a GLB in the viewer, with
+  each slot's base colour (texture or colour feeding Base Color, or a texture parameter
+  named like it when the parent material is outside the project) and a "Mesh info"
+  block (size, triangles, vertices, LODs, Nanite, collision, UV channels, materials).
+  BuildScale3D is applied. UEFN's FBX export stays as a button.
+- **Niagara System** (`backend/preview/niagara_preview.py`, `ui/niagara.js`): the
+  particles are not simulated; each emitter is listed (on/off, CPU/GPU, local space)
+  with its renderers, their material's texture or colour, their meshes, the particle
+  colour, and the module inputs set in its scripts (spawn rate, burst, lifetime,
+  loop...), plus the thumbnail UEFN saved when there is one. UEFN's asset capture does
+  not support Niagara, so a moving picture would need the effect played in the level or
+  in the Niagara editor.
+
+The 3D viewer bundle (`ui/viewer.bundle.js`) defines `import.meta.url` at build time
+(`scripts/build_ui.mjs`): without it, three's DRACOLoader threw at load and no 3D
+preview could open.
+
 ## Develop
 
 ```bash
