@@ -253,6 +253,8 @@
     this.layout = def.layout;
     this.capacity = 4096;
     this.data = new DataSet(this.layout, this.capacity);
+    this.spare = new DataSet(this.layout, this.capacity); // the update writes here, then the two swap
+    this.born = null;
     this.rate = def.rate || 0; this.burst = def.burst || 0; this.burstTime = def.burst_time || 0;
     this.loop = def.loop > 0 && def.loop < 100000 ? def.loop : 0;
     this.color = def.color || null; this.renderer = def.renderer || "Sprite";
@@ -272,9 +274,11 @@
     e.i[152] = this.data.count; e.i[153] = this.total; e.f[155] = this.age;
     this.spawn.setEngine(e); this.update.setEngine(e);
     // update the living particles
-    if (this.data.count) {
-      var next = new DataSet(this.layout, this.capacity);
+    if (this.data.count) { // no new arrays per frame: the survivors go to the spare set, which becomes current
+      var next = this.spare;
+      next.count = 0;
       this.update.run(this.data.count, this.data, next);
+      this.spare = this.data;
       this.data = next;
     }
     if (infos) { // the system script's SpawnOutputInfo: [count, start dt, interval, group] per spawn module
@@ -305,7 +309,9 @@
     this.spawn.setParam("InterpSpawnStartDt", start);
     this.spawn.setParam("SpawnGroup", group, true);
     this.spawn.setParam("ExecutionCount", count, true);
-    var born = new DataSet(this.layout, count);
+    if (!this.born || this.born.capacity < count) this.born = new DataSet(this.layout, Math.max(64, count));
+    var born = this.born;
+    born.count = 0;
     this.spawn.run(count, null, born);
     this.append(born);
     this.total += count;
@@ -505,6 +511,7 @@
       if (key === "8,8,8") return img;
       em.tints = em.tints || {};
       if (!em.tints[key]) {
+        if (Object.keys(em.tints).length >= 32) em.tints = {}; // a colour that changes over life must not grow this forever
         var c = document.createElement("canvas"); c.width = img.naturalWidth; c.height = img.naturalHeight;
         var x = c.getContext("2d");
         x.drawImage(img, 0, 0);
@@ -522,7 +529,7 @@
       start: function () { if (!raf) { last = 0; raf = requestAnimationFrame(frame); } },
       stop: function () { cancelAnimationFrame(raf); raf = 0; },
       restart: function () {
-        emitters.forEach(function (em) { em.data = new DataSet(em.layout, em.capacity); em.age = 0; em.acc = 0; em.burstDone = false; em.total = 0; em.failed = null; });
+        emitters.forEach(function (em) { em.data.count = 0; em.spare.count = 0; em.age = 0; em.acc = 0; em.burstDone = false; em.total = 0; em.failed = null; });
         if (system) system.data = null;
         time = 0;
       },
