@@ -6,73 +6,196 @@
   <title>Widget Preview</title>
   <style>
     :root {
-      --bg: #1a1a1e; --surface: #242429; --text: #e8e8ec; --muted: #9a9aa3;
-      --accent: #6c8cff; --border: #33333a; --err: #f07178; --warn: #e6d27a;
+      color-scheme: dark; /* dark scrollbars and form controls */
+      --bg: #121216; --surface: #17171c; --surface-2: #1d1d23; --surface-3: #25252d; --hover: #2b2b34;
+      --border: #282830; --border-strong: #3a3a45; --text: #ececf1; --muted: #8d8d99; --faint: #5f5f6b;
+      --accent: #7b8cff; --accent-soft: rgba(123,140,255,.14); --green: #5fd38d; --err: #ff7a85; --warn: #f2c94c;
+      --radius: 9px; --panel: 360px;
     }
     * { box-sizing: border-box; }
-    :root { color-scheme: dark; } /* dark scrollbars and form controls */
     html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
-      font: 13px/1.45 system-ui, Segoe UI, sans-serif; }
-    .pane { display: flex; flex-direction: column; height: 100%; }
-    .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px;
-      border-bottom: 1px solid var(--border); background: var(--surface); }
-    .bar h1 { margin: 0 8px 0 0; font-size: 14px; font-weight: 600; }
-    .bar .grow { flex: 1; }
-    button, select { background: var(--surface); color: var(--text); border: 1px solid var(--border);
-      border-radius: 6px; padding: 4px 9px; cursor: pointer; font: inherit; }
-    button:hover, select:hover { border-color: var(--accent); }
-    button.on { border-color: var(--accent); color: var(--accent); }
-    .banner { padding: 6px 12px; background: #2a2a14; color: var(--warn); border-bottom: 1px solid var(--border); }
-    .err { color: var(--err); padding: 10px 12px; }
+      font: 13px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
+    button, select, input, textarea { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    button:disabled { opacity: .4; cursor: default; }
+    [hidden] { display: none !important; }
+    .ic { display: inline-flex; align-items: center; justify-content: center; flex: none; }
+
+    /* ---- layout ------------------------------------------------------------ */
+    .app { display: flex; flex-direction: column; height: 100%; }
     .main { flex: 1; min-height: 0; display: flex; }
-    .stage { flex: 1; min-width: 0; position: relative; background: #1f1f1f; }
+
+    /* ---- top bar: what this is, Play / Edit, a few actions ---------------- */
+    .topbar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; height: 52px; padding: 0 12px;
+      background: var(--surface); border-bottom: 1px solid var(--border); flex: none; }
+    .ident { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .ident-ic { width: 32px; height: 32px; border-radius: 9px; background: linear-gradient(145deg, #3a4a9a, #27306b);
+      color: #dfe4ff; display: inline-flex; align-items: center; justify-content: center; flex: none;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); }
+    .ident-text { min-width: 0; }
+    .ident h1 { margin: 0; font-size: 14px; font-weight: 650; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ident .sub { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .mode { display: inline-flex; padding: 3px; gap: 2px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; }
+    .mode button { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; color: var(--muted);
+      padding: 5px 14px; border-radius: 7px; font-weight: 550; }
+    .mode button:hover { color: var(--text); }
+    .mode button.on { background: var(--surface-3); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.4), inset 0 0 0 1px var(--border-strong); }
+    .mode #btn-edit.on { color: #ffd479; }
+    .top-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+    .icon-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; min-width: 30px; padding: 0 8px;
+      background: none; border: 1px solid transparent; border-radius: 8px; color: var(--muted); }
+    .icon-btn:hover { background: var(--hover); color: var(--text); }
+    .notice { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 999px;
+      background: rgba(242,201,76,.1); border: 1px solid rgba(242,201,76,.28); color: var(--warn); font-size: 12px; }
+    .notice:hover, .notice.on { background: rgba(242,201,76,.18); }
+    .banner { position: absolute; top: 58px; right: 12px; z-index: 20; width: min(440px, calc(100% - 24px)); padding: 12px 14px;
+      background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--radius); color: #e9dfb8;
+      font-size: 12.5px; line-height: 1.5; box-shadow: 0 12px 32px rgba(0,0,0,.5); }
+
+    /* ---- stage: the widget, a floating dock, a status pill ----------------- */
+    .stage { flex: 1; min-width: 0; position: relative; background: #1c1c1c; overflow: hidden; }
     .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-    .side { width: 250px; flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--border);
-      background: var(--surface); min-height: 0; }
-    .side h2 { margin: 0; padding: 8px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: .06em;
-      text-transform: uppercase; color: var(--muted); }
-    .list { padding: 0 6px 6px; overflow: auto; }
-    .anim { display: flex; align-items: center; gap: 4px; padding: 3px 4px; border-radius: 5px; }
-    .anim.active { background: #2e3350; }
-    .anim .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .anim .dur { color: var(--muted); font-variant-numeric: tabular-nums; }
-    .anim button { padding: 1px 6px; }
-    #scrub { width: calc(100% - 20px); margin: 2px 10px 6px; }
-    .insp { padding: 0 10px 8px; overflow: auto; }
-    /* side panel tabs: the preview's controls, or the View Bindings */
-    .tabs { display: flex; gap: 2px; padding: 4px 8px 0; border-bottom: 1px solid var(--border); flex: none; }
-    .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 7px 10px 6px;
-      display: inline-flex; gap: 6px; align-items: center; color: var(--muted); }
+    .err { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px); z-index: 5;
+      padding: 8px 14px; border-radius: 10px; background: rgba(60,18,24,.95); border: 1px solid rgba(255,122,133,.4);
+      color: var(--err); box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+    .dock { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 2px;
+      padding: 4px; background: rgba(23,23,28,.92); border: 1px solid var(--border-strong); border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.45); backdrop-filter: blur(8px); z-index: 4; }
+    .dock-res { display: inline-flex; align-items: center; gap: 6px; padding: 0 4px 0 8px; color: var(--muted); }
+    .dock select { background: none; border: 0; outline: none; color: var(--text); padding: 5px 2px; cursor: pointer; }
+    .dock select option { background: var(--surface-2); }
+    .dock select:disabled { color: var(--muted); cursor: default; }
+    .dock-sep { width: 1px; height: 20px; background: var(--border-strong); margin: 0 4px; }
+    .dock-btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 0; border-radius: 8px;
+      background: none; color: var(--muted); font-size: 12.5px; }
+    .dock-btn:hover { background: var(--hover); color: var(--text); }
+    .dock-btn.on { background: var(--accent-soft); color: var(--accent); }
+    .dock-btn.zoom-step { padding: 0 7px; }
+    .dock-btn.zoom-val { min-width: 54px; justify-content: center; padding: 0 6px; font-variant-numeric: tabular-nums; color: var(--text); }
+    .status { position: absolute; left: 12px; bottom: 14px; max-width: calc(50% - 150px); display: flex; align-items: center; gap: 7px;
+      padding: 6px 10px; border-radius: 9px; background: rgba(23,23,28,.85); border: 1px solid var(--border); color: var(--muted);
+      font-size: 12px; z-index: 3; }
+    .status #hover { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* ---- side panel: tabs and their panes ---------------------------------- */
+    .panel { width: var(--panel); flex: none; display: flex; flex-direction: column; min-height: 0;
+      background: var(--surface); border-left: 1px solid var(--border); }
+    .tabs { display: flex; gap: 2px; padding: 8px 8px 0; border-bottom: 1px solid var(--border); flex: none; }
+    .tabs button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 6px 9px;
+      background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted); font-weight: 550; }
     .tabs button:hover { color: var(--text); }
     .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
-    .tabs .n { background: #33333a; color: var(--text); border-radius: 999px; padding: 0 6px; font-size: 10.5px; line-height: 16px; }
-    .side.tab-bindings, .side.editing.tab-bindings { width: 380px; }
-    .side.tab-bindings > :not(.tabs):not(#bindpane) { display: none !important; }
-    #bindpane { display: none; flex-direction: column; flex: 1; min-height: 0; }
-    .side.tab-bindings #bindpane { display: flex; }
-    .ic { display: inline-flex; align-items: center; justify-content: center; flex: none; }
-    .bhead { padding: 10px 10px 8px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--border); }
-    .bsearch { display: flex; align-items: center; gap: 6px; background: var(--bg); border: 1px solid var(--border);
-      border-radius: 7px; padding: 5px 8px; color: var(--muted); }
+    .tabs .n { background: var(--surface-3); color: var(--muted); border-radius: 999px; padding: 0 6px; font-size: 10.5px; line-height: 16px; font-weight: 500; }
+    .tabs .n.new { background: var(--accent); color: #fff; }
+    .tabpane { display: none; flex: 1; min-height: 0; flex-direction: column; }
+    .panel.tab-main #pane-main, .panel.tab-bindings #bindpane, .panel.tab-log #pane-log { display: flex; }
+    .scroll { flex: 1; min-height: 0; overflow: auto; padding: 4px 12px 14px; }
+    .sec-head { display: flex; align-items: center; gap: 8px; margin: 14px 0 8px; }
+    .sec-head h2 { margin: 0; flex: 1; font-size: 11px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+    .ghost { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border-radius: 7px;
+      background: none; border: 1px solid var(--border); color: var(--muted); font-size: 11.5px; }
+    .ghost:hover { border-color: var(--border-strong); color: var(--text); background: var(--hover); }
+    .empty { color: var(--muted); padding: 18px 8px; text-align: center; border: 1px dashed var(--border); border-radius: var(--radius); }
+    .app.editing .play-only, .app:not(.editing) .edit-only { display: none !important; }
+
+    /* animations */
+    .anim-card { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 8px 8px 8px; margin-bottom: 6px;
+      background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); transition: border-color .12s, background .12s; }
+    .anim-card:hover { border-color: var(--border-strong); }
+    .anim-card.active { border-color: rgba(123,140,255,.55); background: linear-gradient(0deg, var(--accent-soft), var(--accent-soft)), var(--surface-2); }
+    .anim-play { width: 32px; height: 32px; border-radius: 50%; border: 0; display: inline-flex; align-items: center; justify-content: center;
+      background: var(--surface-3); color: var(--text); flex: none; }
+    .anim-play:hover, .anim-card.active .anim-play { background: var(--accent); color: #fff; }
+    .anim-main { flex: 1; min-width: 0; }
+    .anim-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .anim-meta { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+    .anim-card .icon-btn.on { color: var(--accent); background: var(--accent-soft); }
+    #scrub { flex-basis: 100%; width: 100%; margin: 2px 0 0; accent-color: var(--accent); }
+    /* pages of widget switchers */
+    .page-card { padding: 10px; margin-bottom: 6px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); }
+    .page-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-weight: 600; min-width: 0; }
+    .page-head .ic { color: #7dd3fc; }
+    .page-head span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .stepper { display: flex; align-items: center; gap: 8px; }
+    .stepper .dots { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; flex-wrap: wrap; }
+    .stepper .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--surface-3); border: 0; padding: 0; }
+    .stepper .dot.on { background: var(--accent); width: 18px; border-radius: 4px; }
+    .stepper .pos { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
+    .round { width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-3); color: var(--text);
+      display: inline-flex; align-items: center; justify-content: center; }
+    .round:hover { border-color: var(--border-strong); background: var(--hover); }
+
+    /* layers (edit mode) */
+    .app.editing #pane-main .scroll { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 0; }
+    .tree { max-height: 40%; min-height: 80px; overflow: auto; margin: 0 -4px; padding: 0 4px 6px; border-bottom: 1px solid var(--border); flex: none; }
+    .tree .row { display: flex; align-items: center; gap: 7px; height: 28px; padding-right: 6px; border-radius: 7px; cursor: pointer; white-space: nowrap; }
+    .tree .row:hover { background: var(--hover); }
+    .tree .row.sel { background: rgba(255,212,121,.12); box-shadow: inset 0 0 0 1px rgba(255,212,121,.35); }
+    .tree .row .ic { color: #7dd3fc; }
+    .tree .row .lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .tree .row .k { color: var(--faint); font-size: 10.5px; }
+    .tree .row.off .lbl, .tree .row.off .ic { color: var(--faint); }
+    .details { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .insp { flex: 1; min-height: 0; overflow: auto; padding: 0 2px 14px; }
+    .insp .who { display: flex; align-items: center; gap: 10px; padding: 10px; margin-bottom: 4px; background: var(--surface-2);
+      border: 1px solid var(--border); border-radius: var(--radius); }
+    .insp .who .ic { width: 30px; height: 30px; border-radius: 8px; background: rgba(125,211,252,.12); color: #7dd3fc; }
+    .insp .who b { display: block; font-weight: 650; word-break: break-all; }
+    .insp .who small { color: var(--muted); font-size: 11px; }
+    .insp .group { margin: 14px 0 2px; font-size: 10.5px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase; color: var(--faint); }
+    .insp label { display: block; color: var(--muted); font-size: 11.5px; margin: 8px 0 4px; }
+    .insp .row { display: flex; gap: 6px; align-items: center; }
+    .insp input[type=number], .insp input[type=text], .insp textarea, .insp select { width: 100%; min-width: 0; background: var(--bg);
+      border: 1px solid var(--border); border-radius: 7px; padding: 5px 8px; outline: none; }
+    .insp input:focus, .insp textarea:focus, .insp select:focus { border-color: var(--accent); }
+    .insp textarea { resize: vertical; min-height: 54px; }
+    .insp input[type=color] { width: 36px; height: 28px; padding: 2px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); flex: none; }
+    .insp input[type=range] { flex: 1; min-width: 0; accent-color: var(--accent); }
+    .insp .note { color: var(--muted); font-size: 11.5px; margin-top: 12px; line-height: 1.5; }
+    .insp .note.hint { padding: 14px; text-align: center; border: 1px dashed var(--border); border-radius: var(--radius); }
+
+    /* save bar (edit mode): always under the panes */
+    .savebar { display: flex; gap: 6px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--border); background: var(--surface-2); flex: none; }
+    .savebar .count { flex: 1; color: var(--muted); font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+    .savebar .count.dirty { color: #ffd479; }
+    .savebar .count.dirty::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #ffd479; }
+    .btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 8px;
+      background: var(--surface-3); border: 1px solid var(--border-strong); color: var(--text); font-weight: 550; }
+    .btn:hover:not(:disabled) { background: var(--hover); }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn.primary:hover:not(:disabled) { background: #8e9cff; }
+
+    /* event log */
+    #pane-log .sec-head { padding: 0 12px; }
+    #log { flex: 1; min-height: 0; margin: 0 12px 12px; padding: 10px 12px; overflow: auto; background: var(--bg);
+      border: 1px solid var(--border); border-radius: var(--radius); font: 11.5px/1.6 "Cascadia Code", ui-monospace, Consolas, monospace;
+      white-space: pre-wrap; color: #c5cbe0; }
+
+    /* View Bindings (ui/umg/bindings.js) */
+    #bindpane { overflow: hidden; }
+    .bhead { padding: 12px 12px 10px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--border); }
+    .bsearch { display: flex; align-items: center; gap: 7px; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 8px; padding: 6px 9px; color: var(--muted); }
     .bsearch:focus-within { border-color: var(--accent); }
-    .bsearch input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: var(--text); font: inherit; }
+    .bsearch input { flex: 1; min-width: 0; background: none; border: 0; outline: none; }
     .bfilters { display: flex; gap: 5px; flex-wrap: wrap; }
-    .bfilter { padding: 2px 9px; border-radius: 999px; font-size: 11.5px; }
-    .bfilter.on { border-color: var(--accent); color: var(--accent); background: rgba(108,140,255,.1); }
+    .bfilter { padding: 2px 10px; border-radius: 999px; font-size: 11.5px; background: none; border: 1px solid var(--border); color: var(--muted); }
+    .bfilter:hover { color: var(--text); border-color: var(--border-strong); }
+    .bfilter.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
     .bfilter .n, .bgroup h3 .n { color: var(--muted); font-weight: 400; }
-    .blist { flex: 1; min-height: 0; overflow: auto; padding: 4px 10px 10px; }
-    .bgroup h3 { display: flex; align-items: center; gap: 7px; margin: 12px 2px 8px; font-size: 11px; font-weight: 600;
-      letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-    .bcard { background: #1d1d22; border: 1px solid var(--border); border-radius: 9px; padding: 9px 10px; margin: 0 0 8px;
+    .blist { flex: 1; min-height: 0; overflow: auto; padding: 4px 12px 14px; }
+    .bgroup h3 { display: flex; align-items: center; gap: 7px; margin: 14px 2px 8px; font-size: 11px; font-weight: 650;
+      letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+    .bcard { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 11px; margin: 0 0 8px;
       transition: border-color .12s, background .12s; }
-    .bcard:hover { border-color: #50505c; background: #212128; }
+    .bcard:hover { border-color: var(--border-strong); background: #212128; }
     .bcard.off { opacity: .5; }
-    .bcard .end { display: flex; align-items: center; gap: 9px; min-width: 0; }
-    .bcard .end > .ic { width: 28px; height: 28px; border-radius: 7px; background: #2a2a31; }
+    .bcard .end { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .bcard .end > .ic { width: 30px; height: 30px; border-radius: 8px; background: var(--surface-3); }
     .bcard .label { display: flex; flex-direction: column; min-width: 0; flex: 1; }
     .bcard .name { font-weight: 600; font-size: 12.5px; line-height: 1.3; overflow-wrap: break-word; }
     .bcard .detail { color: var(--muted); font-size: 11px; line-height: 1.35; overflow-wrap: break-word; }
-    .bcard .link { display: flex; align-items: center; gap: 8px; min-height: 22px; padding-left: 6px; color: #5c5c68; }
+    .bcard .link { display: flex; align-items: center; gap: 8px; min-height: 22px; padding-left: 7px; color: var(--faint); }
     .chip { display: inline-flex; align-items: center; gap: 3px; flex: none; font-size: 10.5px; line-height: 16px; padding: 0 7px;
       border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
     .chip.fn { color: #ffcf6b; border-color: #4d4127; background: rgba(255,207,107,.07); white-space: normal; }
@@ -83,95 +206,101 @@
     .ic.cond { color: #f78c6c; } .end > .ic.cond { background: rgba(247,140,108,.13); }
     .ic.anim { color: #9be9a8; } .end > .ic.anim { background: rgba(155,233,168,.12); }
     .ic.verse { color: #82aaff; } .end > .ic.verse { background: rgba(130,170,255,.13); }
-    .bcard .try { margin-left: auto; padding: 4px 7px; display: inline-flex; color: #9be9a8; }
+    .bcard .try { margin-left: auto; width: 28px; height: 28px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center;
+      background: rgba(155,233,168,.1); border: 1px solid rgba(155,233,168,.25); color: #9be9a8; }
+    .bcard .try:hover { background: rgba(155,233,168,.2); }
     .bnone { color: var(--muted); padding: 24px 6px; text-align: center; }
-    .insp .who { font-weight: 600; margin-bottom: 2px; word-break: break-all; }
-    .insp .cls { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
-    .insp label { display: block; color: var(--muted); font-size: 11px; margin-top: 6px; }
-    .insp .row { display: flex; gap: 4px; align-items: center; }
-    .insp input[type=number], .insp input[type=text], .insp textarea, .insp select { width: 100%; min-width: 0; background: #1a1a1e; color: var(--text);
-      border: 1px solid var(--border); border-radius: 5px; padding: 3px 5px; font: inherit; }
-    .insp textarea { resize: vertical; min-height: 44px; }
-    .insp input[type=color] { width: 34px; height: 24px; padding: 0; border: 1px solid var(--border); border-radius: 5px; background: none; flex: none; }
-    .insp input[type=range] { flex: 1; min-width: 0; }
-    .insp .note { color: var(--muted); font-size: 11px; margin-top: 6px; }
-    .savebar { display: flex; gap: 6px; padding: 6px 10px; border-top: 1px solid var(--border); align-items: center; }
-    .savebar[hidden], .savebar button[hidden] { display: none; }
+
     /* Shown small (the chat's hover card): only the widget itself. */
     @media (max-width: 560px) and (max-height: 420px) {
-      .bar, .side, .hover, .banner { display: none !important; }
-      .main { flex-direction: row; }
+      .topbar, .panel, .dock, .status, .banner { display: none !important; }
     }
-    .tree { max-height: 32%; overflow: auto; padding: 0 6px 6px; font-size: 12px; }
-    .tree div { padding: 1px 4px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
-    .tree div:hover { background: #2a2a31; }
-    .tree div.sel { background: #3a2f12; color: #ffcf6b; }
-    .tree div.off { color: var(--muted); }
-    .tree .k { color: var(--muted); font-size: 10px; margin-left: 4px; }
-    .side.editing { width: 300px; }
-    .side.editing .play-only { display: none; }
-    .side.editing .insp { flex: 1; min-height: 0; }
-    .side.editing #log { flex: none; height: 70px; }
-    .savebar .count { flex: 1; color: var(--muted); font-size: 11px; }
-    button.primary { border-color: var(--accent); color: var(--accent); }
-    button:disabled { opacity: .45; cursor: default; }
-    #log { flex: 1; min-height: 60px; margin: 0; padding: 4px 10px 8px; overflow: auto;
-      font: 11px/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; color: #c9d1e6; }
-    .empty { color: var(--muted); padding: 2px 10px 8px; }
-    .hover { color: var(--muted); padding: 4px 12px; border-top: 1px solid var(--border); background: var(--surface);
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 27px; }
-    @media (max-width: 620px) { .main { flex-direction: column; } .side { width: auto; max-height: 40%; border-left: 0; border-top: 1px solid var(--border); } }
+    @media (max-width: 760px) {
+      .main { flex-direction: column; }
+      .panel { width: auto; height: 46%; border-left: 0; border-top: 1px solid var(--border); }
+      .topbar { grid-template-columns: 1fr auto; } .top-actions { grid-column: 1 / -1; display: none; }
+    }
   </style>
 </head>
 <body>
-<div class="pane">
-  <div class="bar">
-    <h1 id="title">…</h1>
-    <select id="res" title="Screen size">
-      <option value="1920x1080">1920 × 1080</option>
-      <option value="1280x720">1280 × 720</option>
-      <option value="2560x1080">2560 × 1080 (ultrawide)</option>
-      <option value="1280x800">1280 × 800 (Steam Deck)</option>
-      <option value="2340x1080">2340 × 1080 (phone)</option>
-    </select>
-    <button type="button" id="btn-hints" title="Outline every clickable button">Show buttons</button>
-    <button type="button" id="btn-mute">Mute</button>
-    <button type="button" id="btn-edit" title="Select, move and change widgets, then save into the .uasset">Edit</button>
-    <span class="grow"></span>
-    <button type="button" id="btn-reload">Reload</button>
-    <button type="button" id="btn-details">Asset details</button>
-  </div>
+<div class="app">
+  <header class="topbar">
+    <div class="ident">
+      <span class="ident-ic" id="ident-ic"></span>
+      <div class="ident-text"><h1 id="title">…</h1><div class="sub" id="subtitle"></div></div>
+    </div>
+    <div class="mode">
+      <button type="button" id="mode-play" class="on" title="Use the widget: hover and click its buttons, play its animations">Play</button>
+      <button type="button" id="btn-edit" title="Select, move and change widgets, then save into the .uasset">Edit</button>
+    </div>
+    <div class="top-actions">
+      <button type="button" class="notice" id="notice" hidden></button>
+      <button type="button" class="icon-btn" id="btn-reload" title="Reload the widget from its file"></button>
+      <button type="button" class="icon-btn" id="btn-details" title="Asset details"></button>
+    </div>
+  </header>
   <div id="banner" class="banner" hidden></div>
-  <div id="err" class="err" hidden></div>
   <div class="main">
-    <div class="stage"><canvas id="stage"></canvas></div>
-    <div class="side">
-      <div class="tabs" id="side-tabs">
-        <button type="button" data-tab="preview" class="on"></button>
-        <button type="button" data-tab="bindings" title="The widget's View Bindings, as UEFN lists them"></button>
+    <div class="stage">
+      <canvas id="stage"></canvas>
+      <div id="err" class="err" hidden></div>
+      <div class="status"><span id="status-ic"></span><span id="hover">Move the mouse over the widget; click its buttons.</span></div>
+      <div class="dock">
+        <label class="dock-res" title="Screen size"><span id="res-ic"></span>
+          <select id="res">
+            <option value="1920x1080">1920 × 1080</option>
+            <option value="1280x720">1280 × 720</option>
+            <option value="2560x1080">2560 × 1080 · ultrawide</option>
+            <option value="1280x800">1280 × 800 · Steam Deck</option>
+            <option value="2340x1080">2340 × 1080 · phone</option>
+          </select>
+        </label>
+        <span class="dock-sep"></span>
+        <button type="button" class="dock-btn" id="btn-hints" title="Outline every clickable button"></button>
+        <button type="button" class="dock-btn" id="btn-mute" title="Mute the widget's sounds"></button>
+        <span class="dock-sep"></span>
+        <button type="button" class="dock-btn zoom-step" id="zoom-out" title="Zoom out (Ctrl -)"></button>
+        <button type="button" class="dock-btn zoom-val" id="zoom-fit" title="Fit the screen in the panel (Ctrl 0). Wheel: zoom · right button, middle button or Space + drag: move the view · Ctrl 1: 100 %">100 %</button>
+        <button type="button" class="dock-btn zoom-step" id="zoom-in" title="Zoom in (Ctrl +)"></button>
       </div>
-      <div id="bindpane"></div>
-      <h2 class="play-only">Animations</h2>
-      <div class="list play-only" id="anims"></div>
-      <input type="range" id="scrub" min="0" max="1000" value="0" hidden />
-      <h2 id="pages-title" hidden>Pages (widget switchers)</h2>
-      <div class="list" id="pages" hidden></div>
-      <h2 id="tree-title" hidden>Hierarchy</h2>
-      <div class="tree" id="tree" hidden></div>
-      <h2 id="insp-title" hidden>Selected widget</h2>
-      <div class="insp" id="insp" hidden></div>
+    </div>
+    <aside class="panel side tab-main">
+      <nav class="tabs" id="side-tabs">
+        <button type="button" data-tab="main" class="on"></button>
+        <button type="button" data-tab="bindings" title="The widget's View Bindings, as UEFN lists them"></button>
+        <button type="button" data-tab="log" title="What happened in the preview"></button>
+      </nav>
+      <div class="tabpane" id="pane-main">
+        <div class="scroll">
+          <div class="play-only">
+            <div class="sec-head"><h2>Animations</h2><button type="button" class="ghost" id="btn-stop" hidden title="Stop every animation and put the widget back as it was"></button></div>
+            <div id="anims"></div>
+            <input type="range" id="scrub" min="0" max="1000" value="0" hidden />
+            <div class="sec-head" id="pages-title" hidden><h2>Pages</h2></div>
+            <div id="pages" hidden></div>
+          </div>
+          <div class="sec-head edit-only" id="tree-title" hidden><h2>Layers</h2></div>
+          <div class="tree edit-only" id="tree" hidden></div>
+          <div class="details edit-only">
+            <div class="sec-head" id="insp-title" hidden><h2>Details</h2></div>
+            <div class="insp" id="insp" hidden></div>
+          </div>
+        </div>
+      </div>
+      <div class="tabpane" id="bindpane"></div>
+      <div class="tabpane" id="pane-log">
+        <div class="sec-head"><h2>Events</h2><button type="button" class="ghost" id="btn-clear-log">Clear</button></div>
+        <pre id="log"></pre>
+      </div>
       <div class="savebar" id="savebar" hidden>
         <span class="count" id="pending">No changes</span>
-        <button type="button" id="btn-undo-save" title="Put back the file as it was before the last save" hidden>Undo save</button>
-        <button type="button" id="btn-discard" disabled>Discard</button>
-        <button type="button" id="btn-save" class="primary" disabled>Save</button>
-        <button type="button" id="btn-save-uefn" class="primary" hidden title="UEFN saves its own version of this widget first, then these changes are applied on top">Save in UEFN, then apply</button>
+        <button type="button" class="btn" id="btn-undo-save" title="Put back the file as it was before the last save" hidden>Undo save</button>
+        <button type="button" class="btn" id="btn-discard" disabled>Discard</button>
+        <button type="button" class="btn primary" id="btn-save" disabled>Save</button>
+        <button type="button" class="btn primary" id="btn-save-uefn" hidden title="UEFN saves its own version of this widget first, then these changes are applied on top">Save in UEFN, then apply</button>
       </div>
-      <h2>Events</h2>
-      <pre id="log"></pre>
-    </div>
+    </aside>
   </div>
-  <div class="hover" id="hover">Move the mouse over the widget; click its buttons.</div>
 </div>
 <script src="umg/material.js"></script>
 <script src="umg/engine.js"></script>
@@ -202,7 +331,9 @@
 
   var query = new URLSearchParams(location.search);
   var filePath = query.get("file") || "";
-  var engine = null, scrubAnim = null, logLines = [];
+  var engine = null, scrubAnim = null, logLines = [], unread = 0;
+  var UI = window.UmgBindings; // icons (ui/umg/bindings.js)
+  function ico(name, cls) { return UI.icon(name, cls); }
 
   function log(line) {
     var t = new Date(), stamp = [t.getHours(), t.getMinutes(), t.getSeconds()].map(function (n) { return String(n).padStart(2, "0"); }).join(":");
@@ -210,6 +341,7 @@
     if (logLines.length > 200) logLines.shift();
     $("log").textContent = logLines.join("\n");
     $("log").scrollTop = $("log").scrollHeight;
+    if (sideTab !== "log") { unread++; labelTabs(); }
   }
   function showErr(msg) { $("err").hidden = !msg; $("err").textContent = msg || ""; }
 
@@ -237,44 +369,52 @@
   function renderAnims(spec) {
     var host = $("anims");
     host.innerHTML = "";
+    $("btn-stop").hidden = !spec.animations.length;
     if (!spec.animations.length) { host.innerHTML = '<div class="empty">This widget has no animations.</div>'; return; }
     spec.animations.forEach(function (a) {
-      var row = document.createElement("div");
-      row.className = "anim"; row.dataset.name = a.name;
-      var name = document.createElement("span"); name.className = "name"; name.textContent = a.name; name.title = a.name;
-      var dur = document.createElement("span"); dur.className = "dur"; dur.textContent = (a.end - a.start).toFixed(2) + "s";
-      var play = document.createElement("button"); play.textContent = "▶"; play.title = "Play once";
-      var loop = document.createElement("button"); loop.textContent = "⟳"; loop.title = "Loop";
+      var row = el("div", { className: "anim-card" }, host); row.dataset.name = a.name;
+      var play = el("button", { type: "button", className: "anim-play", title: "Play once" }, row); play.appendChild(ico("play"));
+      var main = el("div", { className: "anim-main" }, row);
+      el("div", { className: "anim-name", text: a.name, title: a.name }, main);
+      var sounds = (a.audio || []).length;
+      el("div", { className: "anim-meta", text: (a.end - a.start).toFixed(2) + " s" + (sounds ? " · " + sounds + " sound" + (sounds > 1 ? "s" : "") : "") }, main);
+      var loop = el("button", { type: "button", className: "icon-btn", title: "Play in a loop" }, row); loop.appendChild(ico("loop"));
       play.onclick = function () { start(a, false); };
       loop.onclick = function () { start(a, true); };
-      row.append(name, dur, play, loop);
-      host.appendChild(row);
     });
-    var stop = document.createElement("button");
-    stop.textContent = "■ Stop and reset"; stop.style.margin = "4px";
-    stop.onclick = function () { engine.stop(); markActive(""); $("scrub").hidden = true; };
-    host.appendChild(stop);
   }
-  /* Side panel tabs: the preview's controls, or the widget's View Bindings (ui/umg/bindings.js). */
-  var sideTab = "preview";
-  try { sideTab = localStorage.getItem("umg.sideTab") === "bindings" ? "bindings" : "preview"; } catch (e) {}
+  /* Side panel tabs: the preview's controls (Animations, or Layers while editing), the widget's
+   * View Bindings (ui/umg/bindings.js), and the event log. The open tab is remembered. */
+  var sideTab = "main", bindingCount = 0;
+  try { var saved = localStorage.getItem("umg.sideTab"); if (saved === "bindings" || saved === "log") sideTab = saved; } catch (e) {}
+  function editing() { return $("btn-edit").classList.contains("on"); }
+  function labelTabs() {
+    var tabs = document.querySelectorAll("#side-tabs button");
+    if (!tabs.length) return;
+    tabs[0].replaceChildren(ico(editing() ? "layers" : "play"), document.createTextNode(editing() ? "Layers" : "Animations"));
+    var n = document.createElement("span"); n.className = "n"; n.textContent = String(bindingCount);
+    tabs[1].replaceChildren(ico("link"), document.createTextNode("Bindings"), n);
+    var parts = [ico("log"), document.createTextNode("Log")];
+    if (unread) { var u = document.createElement("span"); u.className = "n new"; u.textContent = unread > 99 ? "99+" : String(unread); parts.push(u); }
+    tabs[2].replaceChildren.apply(tabs[2], parts);
+  }
   function showTab(tab) {
     sideTab = tab;
-    document.querySelector(".side").classList.toggle("tab-bindings", tab === "bindings");
+    var panel = document.querySelector(".panel");
+    ["main", "bindings", "log"].forEach(function (t) { panel.classList.toggle("tab-" + t, t === tab); });
     Array.prototype.forEach.call(document.querySelectorAll("#side-tabs button"), function (b) { b.classList.toggle("on", b.dataset.tab === tab); });
     try { localStorage.setItem("umg.sideTab", tab); } catch (e) {}
+    if (tab === "log") { unread = 0; $("log").scrollTop = $("log").scrollHeight; }
     if (engine) engine.highlight(null);
+    labelTabs();
   }
   Array.prototype.forEach.call(document.querySelectorAll("#side-tabs button"), function (b) { b.onclick = function () { showTab(b.dataset.tab); }; });
   function renderBindings(spec) {
-    var ui = window.UmgBindings, made = ui.create($("bindpane"), { engine: engine, spec: spec, onPlay: function (name) {
+    var made = UI.create($("bindpane"), { engine: engine, spec: spec, onPlay: function (name) {
       var anim = (spec.animations || []).filter(function (a) { return a.name === name; })[0];
       if (anim) start(anim, false);
     } });
-    var tabs = document.querySelectorAll("#side-tabs button");
-    tabs[0].replaceChildren(ui.icon("preview"), document.createTextNode("Preview"));
-    var n = document.createElement("span"); n.className = "n"; n.textContent = String(made.total);
-    tabs[1].replaceChildren(ui.icon("link"), document.createTextNode("Bindings"), n);
+    bindingCount = made.total;
     showTab(sideTab);
   }
   // Which page a switcher shows is decided by Verse in game; here you flip it by hand.
@@ -282,22 +422,33 @@
     var host = $("pages"), list = engine.switchers();
     host.innerHTML = ""; host.hidden = $("pages-title").hidden = !list.length;
     list.forEach(function (s) {
-      var row = document.createElement("div"); row.className = "anim";
-      var name = document.createElement("span"); name.className = "name"; name.textContent = s.label; name.title = s.label;
-      var pos = document.createElement("span"); pos.className = "dur";
-      var prev = document.createElement("button"); prev.textContent = "◀";
-      var next = document.createElement("button"); next.textContent = "▶";
-      var show = function (i) { s.active = engine.setSwitcher(s.id, i); pos.textContent = (s.active + 1) + " / " + s.count; };
+      var card = el("div", { className: "page-card" }, host);
+      var head = el("div", { className: "page-head", title: s.label }, card);
+      head.appendChild(ico("switcher")); el("span", { text: s.label }, head);
+      var step = el("div", { className: "stepper" }, card);
+      var prev = el("button", { type: "button", className: "round", title: "Previous page" }, step); prev.appendChild(ico("prev"));
+      var dots = el("div", { className: "dots" }, step);
+      var next = el("button", { type: "button", className: "round", title: "Next page" }, step); next.appendChild(ico("next"));
+      var pos = el("span", { className: "pos" }, step);
+      var show = function (i) {
+        s.active = engine.setSwitcher(s.id, i);
+        pos.textContent = (s.active + 1) + " / " + s.count;
+        Array.prototype.forEach.call(dots.children, function (d, k) { d.classList.toggle("on", k === s.active); });
+      };
+      for (var k = 0; k < s.count; k++) (function (k) {
+        var d = el("button", { type: "button", className: "dot", title: "Page " + (k + 1) }, dots); d.onclick = function () { show(k); };
+      })(k);
       prev.onclick = function () { show(s.active - 1); }; next.onclick = function () { show(s.active + 1); };
-      pos.textContent = (s.active + 1) + " / " + s.count;
-      row.append(name, pos, prev, next); host.appendChild(row);
+      show(s.active);
     });
   }
   function markActive(name) {
-    Array.prototype.forEach.call(document.querySelectorAll(".anim"), function (el) { el.classList.toggle("active", el.dataset.name === name); });
+    Array.prototype.forEach.call(document.querySelectorAll(".anim-card"), function (el) { el.classList.toggle("active", el.dataset.name === name); });
   }
   function start(anim, loop) {
     scrubAnim = anim; $("scrub").hidden = false; markActive(anim.name);
+    var card = document.querySelector('.anim-card[data-name="' + anim.name.replace(/"/g, '\\"') + '"]');
+    if (card) card.appendChild($("scrub"));
     engine.play(anim.name, { loop: loop });
     log("▶ " + anim.name + (loop ? " (loop)" : ""));
     if (anim.audio.some(function (s) { return !(engine.spec.assets[s.sound] || {}).url; })) log("  (a sound of this animation is not available yet)");
@@ -314,13 +465,19 @@
     var report = engine && engine.materialReport ? engine.materialReport() : { failed: [] };
     report.failed.forEach(function (f) { text += (text ? " " : "") + "Material " + f.name + " is shown from its thumbnail (" + f.error + ")."; });
     (res.spec.warnings || []).forEach(function (w) { text += (text ? " " : "") + w; });
-    $("banner").hidden = !text; $("banner").textContent = text;
+    var count = parts.length + report.failed.length + (res.spec.warnings || []).length;
+    $("banner").textContent = text; $("banner").hidden = true;
+    $("notice").hidden = !text; $("notice").classList.remove("on");
+    $("notice").replaceChildren(ico("warn"), document.createTextNode(count + " note" + (count > 1 ? "s" : "")));
+    $("notice").title = text;
   }
 
   function mount(res) {
     if (engine) engine.dispose();
     var spec = res.spec;
     $("title").textContent = spec.name;
+    var folder = String(spec.package || "").split("/").filter(Boolean).slice(1, -1).join("/");
+    $("subtitle").textContent = "Widget Blueprint" + (folder ? " · Content/" + folder : "");
     if (!spec.root) { showErr("This Widget Blueprint has an empty tree."); return; }
     engine = window.UmgEngine.create($("stage"), spec, { drawBackground: background });
     applyRes();
@@ -334,10 +491,13 @@
       else if (type === "bound" && d.event.indexOf("Click") >= 0) log("  plays " + d.animation + "  [" + d.widget + "]");
       else if (type === "select") { renderInspector(d.id ? d : null); markTree(d.id || 0); }
       else if (type === "edit") {
+        redoStack = [];
         d.changes.forEach(function (c) { undoStack.push({ id: d.node.id, field: c[0], before: c[2], group: undoGroup }); record(d.node, c[0], c[1]); });
         undoGroup++; renderInspector(engine.selection());
       }
-      else if (type === "pointer") $("hover").textContent = d.widget ? d.kind + "  " + d.label + (d.label !== d.widget ? "  (" + d.widget + ")" : "") : "—";
+      else if (type === "open") { var area = document.querySelector("#insp textarea"); if (area) { area.focus(); area.select(); } }
+      else if (type === "view") $("zoom-fit").textContent = d.percent + " %";
+      else if (type === "pointer") $("hover").textContent = d.widget ? d.label + (d.label !== d.widget ? "  (" + d.widget + ")" : "") + "  ·  " + d.kind : idleStatus();
       else if (type === "animation" && scrubAnim && d.time != null) {
         var span = scrubAnim.end - scrubAnim.start;
         $("scrub").value = span > 0 ? Math.round(1000 * (d.time - scrubAnim.start) / span) : 0;
@@ -349,9 +509,9 @@
     mediaBanner(res);
     window.__umg = engine;
     if (/(^|[#&])stats/.test(location.hash)) engine.toggleStats(); // dev: open with the performance overlay
-    engine.setEditMode($("btn-edit").classList.contains("on"));
-    engine.setDesignTime($("btn-edit").classList.contains("on")); // editing shows everything, as UEFN's designer does
-    renderInspector(null); refreshSaveBar(); renderTree(); undoStack = []; originals = {};
+    engine.setEditMode(editing());
+    engine.setDesignTime(editing()); // editing shows everything, as UEFN's designer does
+    renderInspector(null); refreshSaveBar(); renderTree(); undoStack = []; redoStack = []; originals = {};
   }
 
   function applyRes() {
@@ -381,8 +541,39 @@
   }
 
   $("res").onchange = applyRes;
+  function idleStatus() {
+    return editing() ? "Click to select · drag to move · handles to resize · wheel to zoom" : "Move the mouse over the widget; click its buttons.";
+  }
+  $("zoom-in").onclick = function () { if (engine) engine.zoom("in"); };
+  $("zoom-out").onclick = function () { if (engine) engine.zoom("out"); };
+  $("zoom-fit").onclick = function () { if (engine) engine.zoom("fit"); };
+  function dressDock() {
+    var muted = $("btn-mute").classList.contains("on");
+    $("btn-hints").replaceChildren(ico("pointer"), document.createTextNode("Buttons"));
+    $("btn-mute").replaceChildren(ico(muted ? "muted" : "sound"), document.createTextNode(muted ? "Muted" : "Sound"));
+    $("zoom-in").replaceChildren(ico("plus")); $("zoom-out").replaceChildren(ico("minus"));
+  }
   $("btn-hints").onclick = function () { this.classList.toggle("on"); if (engine) engine.setHints(this.classList.contains("on")); };
-  $("btn-mute").onclick = function () { this.classList.toggle("on"); if (engine) engine.setMuted(this.classList.contains("on")); };
+  $("btn-mute").onclick = function () { this.classList.toggle("on"); dressDock(); if (engine) engine.setMuted(this.classList.contains("on")); };
+  $("btn-stop").onclick = function () { if (!engine) return; engine.stop(); markActive(""); $("scrub").hidden = true; log("■ stopped and reset"); };
+  $("btn-clear-log").onclick = function () { logLines = []; $("log").textContent = ""; };
+  $("notice").onclick = function (ev) { ev.stopPropagation(); var open = $("banner").hidden; $("banner").hidden = !open; this.classList.toggle("on", open); };
+  document.addEventListener("click", function (ev) {
+    if (!$("banner").hidden && !$("banner").contains(ev.target)) { $("banner").hidden = true; $("notice").classList.remove("on"); }
+  });
+  // icons of the fixed controls
+  $("ident-ic").replaceChildren(UI.kindIcon("UserWidget", ""));
+  $("res-ic").replaceChildren(ico("monitor"));
+  $("status-ic").replaceChildren(ico("pointer"));
+  $("btn-reload").replaceChildren(ico("refresh"));
+  $("btn-details").replaceChildren(ico("info"));
+  $("mode-play").replaceChildren(ico("play"), document.createTextNode("Play"));
+  $("btn-edit").replaceChildren(ico("edit"), document.createTextNode("Edit"));
+  $("btn-stop").replaceChildren(ico("stop"), document.createTextNode("Stop"));
+  $("btn-clear-log").replaceChildren(ico("trash"), document.createTextNode("Clear"));
+  $("btn-undo-save").replaceChildren(ico("undo"), document.createTextNode("Undo save"));
+  $("btn-save").replaceChildren(ico("save"), document.createTextNode("Save"));
+  dressDock(); labelTabs();
   // ---- editing -----------------------------------------------------------
   // pending: "widget|field" -> {widget, kind, field, value}; the last value of a field wins.
   var pending = {};
@@ -401,7 +592,7 @@
     refreshSaveBar();
   }
   // undo: one entry per changed field, with the value it had; entries of one gesture share a group
-  var undoStack = [], undoGroup = 1, originals = {};
+  var undoStack = [], redoStack = [], undoGroup = 1, originals = {};
   function valueOf(desc, field) {
     var parts = field.split("."), v = desc.fields[parts[0]];
     v = parts.length > 1 ? v[+parts[1]] : v;
@@ -411,20 +602,27 @@
   function change(node, field, value) {
     var before = valueOf(engine.describeNode(node.id), field), last = undoStack[undoStack.length - 1];
     if (!engine.setField(node.id, field, value)) return;
+    redoStack = [];
     // typing or dragging a slider keeps refining the same entry instead of adding one per keystroke
     if (!(last && last.id === node.id && last.field === field && last.live)) undoStack.push({ id: node.id, field: field, before: before, group: undoGroup++, live: true });
     record(node, field, value);
   }
-  function undo() {
-    if (!undoStack.length) return;
-    var group = undoStack[undoStack.length - 1].group;
-    while (undoStack.length && undoStack[undoStack.length - 1].group === group) {
-      var u = undoStack.pop(), desc = engine.describeNode(u.id);
-      engine.setField(u.id, u.field, u.before);
+  // undo moves a whole gesture (its entries share a group) to the redo stack, redo moves it back
+  function undo() { step(undoStack, redoStack, "before", "after"); }
+  function redo() { step(redoStack, undoStack, "after", "before"); }
+  function step(from, to, use, keep) {
+    if (!from.length) return;
+    var group = from[from.length - 1].group, moved = [];
+    while (from.length && from[from.length - 1].group === group) {
+      var u = from.pop(), desc = engine.describeNode(u.id), entry = { id: u.id, field: u.field, group: group };
+      entry[keep] = valueOf(desc, u.field); entry[use] = u[use];
+      engine.setField(u.id, u.field, u[use]);
       var key = desc.name + "|" + u.field;
-      if (key in originals && same(originals[key], u.before)) delete pending[key];
-      else pending[key] = { widget: desc.name, kind: desc.kind, field: u.field, value: u.before };
+      if (key in originals && same(originals[key], u[use])) delete pending[key];
+      else pending[key] = { widget: desc.name, kind: desc.kind, field: u.field, value: u[use] };
+      moved.unshift(entry);
     }
+    Array.prototype.push.apply(to, moved);
     refreshSaveBar(); renderInspector(engine.selection());
   }
   function renderTree() {
@@ -432,15 +630,17 @@
     host.hidden = $("tree-title").hidden = !editing; host.innerHTML = "";
     if (!editing || !engine) return;
     engine.tree().forEach(function (n) {
-      var row = el("div", { text: n.label, title: n.label + " (" + n.kind + ")" }, host);
-      row.style.paddingLeft = (4 + n.depth * 10) + "px"; row.dataset.id = n.id;
-      if (n.hidden) row.className = "off";
+      var row = el("div", { className: "row" + (n.hidden ? " off" : ""), title: n.label + " (" + n.kind + ")" + (n.hidden ? ", hidden" : "") }, host);
+      row.style.paddingLeft = (6 + n.depth * 14) + "px"; row.dataset.id = n.id;
+      row.appendChild(UI.kindIcon(n.kind, ""));
+      el("span", { className: "lbl", text: n.label }, row);
+      if (n.hidden) row.appendChild(ico("eyeOff"));
       el("span", { className: "k", text: n.kind }, row);
       row.onclick = function () { engine.select(n.id); };
     });
   }
   function markTree(id) {
-    Array.prototype.forEach.call(document.querySelectorAll("#tree div"), function (row) {
+    Array.prototype.forEach.call(document.querySelectorAll("#tree .row"), function (row) {
       var on = +row.dataset.id === id; row.classList.toggle("sel", on);
       if (on) row.scrollIntoView({ block: "nearest" });
     });
@@ -449,9 +649,14 @@
     if (engine && ev.shiftKey && (ev.key === "F" || ev.key === "f") && !/^(INPUT|TEXTAREA|SELECT)$/.test((ev.target && ev.target.tagName) || "")) {
       engine.toggleStats(); return; // performance overlay
     }
+    var typing = /^(INPUT|TEXTAREA|SELECT)$/.test((ev.target && ev.target.tagName) || ""), ctrl = ev.ctrlKey || ev.metaKey;
+    var zoomKey = { "0": "fit", "1": "actual", "=": "in", "+": "in", "-": "out" }[ev.key];
+    if (engine && ctrl && zoomKey && !typing) { ev.preventDefault(); engine.zoom(zoomKey); return; }
     if (!engine || !$("btn-edit").classList.contains("on")) return;
-    var typing = /^(INPUT|TEXTAREA|SELECT)$/.test((ev.target && ev.target.tagName) || "");
-    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "z" && !typing) { ev.preventDefault(); undo(); return; }
+    var key = ev.key.toLowerCase();
+    if (ctrl && !typing && (key === "y" || (key === "z" && ev.shiftKey))) { ev.preventDefault(); redo(); return; }
+    if (ctrl && !typing && key === "z") { ev.preventDefault(); undo(); return; }
+    if (ev.key === "Escape" && !typing) { engine.select(0); return; }
     var move = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[ev.key], sel = engine.selection();
     if (!move || typing || !sel) return;
     ev.preventDefault();
@@ -467,6 +672,7 @@
     var n = Object.keys(pending).length, editing = $("btn-edit").classList.contains("on");
     $("savebar").hidden = !editing;
     $("pending").textContent = n ? n + " unsaved change" + (n > 1 ? "s" : "") : "No changes";
+    $("pending").classList.toggle("dirty", !!n);
     $("btn-save").disabled = !n || !!window.__offlineDemo; $("btn-discard").disabled = !n;
     if (window.__offlineDemo && n) $("pending").textContent += " (this example page cannot save)";
   }
@@ -497,11 +703,19 @@
     host.innerHTML = ""; host.hidden = $("insp-title").hidden = !editing;
     if (!editing) return;
     if (undoStack.length) undoStack[undoStack.length - 1].live = false; // a new selection starts a new undo step
-    if (!node) { el("div", { className: "note", text: "Click a widget in the preview or in the hierarchy. Drag to move, arrow keys to nudge (Shift: 10), Ctrl+Z to undo." }, host); return; }
+    if (!node) { el("div", { className: "note hint", text: "" }, host).append(
+      "Click a widget in the preview or in the layers.", el("br"),
+      "Drag it to move it (Shift: in a straight line), pull a handle to resize it (Shift: keep proportions, Alt: from the centre). ",
+      "Pink lines show it lining up with the others; hold Ctrl to place it freely.", el("br"),
+      "Arrow keys nudge (Shift: 10) · Ctrl+Z undo · Ctrl+Y redo · Esc deselect · wheel zoom · right button drags the view."); return; }
     var f = node.fields;
-    el("div", { className: "who", text: node.label }, host);
-    el("div", { className: "cls", text: node.kind + (node.className !== node.kind ? " · " + node.className : "") }, host);
+    var who = el("div", { className: "who" }, host);
+    who.appendChild(UI.kindIcon(node.kind, ""));
+    var whoText = el("div", {}, who);
+    el("b", { text: node.label }, whoText);
+    el("small", { text: node.kind + (node.className !== node.kind ? " · " + node.className : "") }, whoText);
     if (f.text != null) {
+      el("div", { className: "group", text: "Text" }, host);
       el("label", { text: "Text" }, host);
       var area = el("textarea", { value: f.text }, host);
       area.oninput = function () { change(node, "text", area.value); };
@@ -510,7 +724,8 @@
       colorRow(host, "Shadow colour", f.shadow_color, function (c) { change(node, "shadow_color", c); });
     }
     if (f.tint) {
-      el("label", { text: "Image" }, host);
+      el("div", { className: "group", text: "Image" }, host);
+      el("label", { text: "Picture" }, host);
       var select = el("select", {}, host);
       el("option", { value: "", text: "(none)" }, select);
       engine.images().forEach(function (img) { el("option", { value: img.key, text: img.name + (img.kind === "material" ? " (material)" : "") }, select); });
@@ -541,6 +756,7 @@
       colorRow(host, "Colour and opacity", f.image_color, function (c) { change(node, "image_color", c); });
       numberRow(host, "Image size (W, H)", f.image_size, 1, function (i, v) { f.image_size[i] = v; change(node, "image_size", f.image_size.slice()); });
     }
+    el("div", { className: "group", text: "Layout" }, host);
     if (f.offsets) {
       numberRow(host, "Position (X, Y)", f.offsets.slice(0, 2), 1, function (i, v) { change(node, "offsets." + i, v); });
       numberRow(host, "Size (W, H) or right/bottom margin", f.offsets.slice(2, 4), 1, function (i, v) { change(node, "offsets." + (i + 2), v); });
@@ -548,6 +764,7 @@
     } else if (f.padding) {
       numberRow(host, "Padding (left, top, right, bottom)", f.padding, 1, function (i, v) { change(node, "padding." + i, v); });
     }
+    el("div", { className: "group", text: "Appearance" }, host);
     numberRow(host, "Opacity (0-1)", [f.opacity], 0.05, function (i, v) { change(node, "opacity", Math.min(1, Math.max(0, v))); });
     numberRow(host, "Offset (X, Y)", f.translation, 1, function (i, v) { f.translation[i] = v; change(node, "translation", f.translation.slice()); });
     numberRow(host, "Scale (X, Y)", f.scale, 0.05, function (i, v) { f.scale[i] = v; change(node, "scale", f.scale.slice()); });
@@ -558,12 +775,17 @@
     if (window.__offlineDemo || !filePath) return;
     rpc("umg_backup_count", { relative_path: filePath }).then(function (r) { $("btn-undo-save").hidden = !(r && r.count); }).catch(function () {});
   }
-  $("btn-edit").onclick = function () {
-    this.classList.toggle("on");
-    if (engine) { engine.setEditMode(this.classList.contains("on")); engine.setDesignTime(this.classList.contains("on")); }
-    document.querySelector(".side").classList.toggle("editing", this.classList.contains("on"));
+  function setEditing(on) {
+    if (on === editing()) return;
+    $("btn-edit").classList.toggle("on", on); $("mode-play").classList.toggle("on", !on);
+    if (engine) { engine.setEditMode(on); engine.setDesignTime(on); }
+    document.querySelector(".app").classList.toggle("editing", on);
+    if (on && sideTab === "log") showTab("main"); else labelTabs();
     renderInspector(null); refreshSaveBar(); refreshUndo(); renderTree();
-  };
+    $("hover").textContent = idleStatus();
+  }
+  $("btn-edit").onclick = function () { setEditing(true); };
+  $("mode-play").onclick = function () { setEditing(false); };
   $("btn-discard").onclick = function () { pending = {}; load().catch(function (e) { showErr(e.message || String(e)); }); };
   function save(saveInUefnFirst) {
     var edits = Object.keys(pending).map(function (k) { return pending[k]; });

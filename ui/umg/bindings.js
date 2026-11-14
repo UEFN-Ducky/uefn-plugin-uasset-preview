@@ -25,7 +25,29 @@
     switcher: '<rect x="4.5" y="2.5" width="9" height="7" rx="1"/><path d="M2.5 5.5v7a1 1 0 001 1h7"/>',
     progress: '<rect x="2" y="6" width="12" height="4" rx="2"/><path d="M4 8h5"/>',
     widget: '<rect x="3" y="3" width="10" height="10" rx="1.5"/>',
-    chevron: '<path d="M6 4l4 4-4 4"/>'
+    chevron: '<path d="M6 4l4 4-4 4"/>',
+    // the rest of the preview's interface
+    layers: '<path d="M8 2.5l5.5 3L8 8.5l-5.5-3z"/><path d="M2.5 8.5L8 11.5l5.5-3"/><path d="M2.5 11L8 14l5.5-3"/>',
+    log: '<rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M4.5 6.5l2 1.5-2 1.5"/><path d="M8 10h3.5"/>',
+    monitor: '<rect x="2" y="3" width="12" height="8" rx="1.2"/><path d="M6 13.5h4"/><path d="M8 11v2.5"/>',
+    pointer: '<path d="M4 2.5l8 5.2-3.6.9 2 3.9-1.5.8-2-3.9L4 12z"/>',
+    sound: '<path d="M3 6.5h2L8 4v8L5 9.5H3z"/><path d="M10.5 6a3 3 0 010 4"/><path d="M12 4.5a5 5 0 010 7"/>',
+    muted: '<path d="M3 6.5h2L8 4v8L5 9.5H3z"/><path d="M10.5 6.5l3 3"/><path d="M13.5 6.5l-3 3"/>',
+    refresh: '<path d="M13 4.5V7h-2.5"/><path d="M12.6 7A5 5 0 103.4 9.5"/>',
+    info: '<circle cx="8" cy="8" r="5.5"/><path d="M8 7.5v3.5"/><path d="M8 5.2v.1"/>',
+    warn: '<path d="M8 2.5l6 10.5H2z"/><path d="M8 6.5v3"/><path d="M8 11.3v.1"/>',
+    loop: '<path d="M11.5 3.5L13 5l-1.5 1.5"/><path d="M3 8V7a2 2 0 012-2h8"/><path d="M4.5 12.5L3 11l1.5-1.5"/><path d="M13 8v1a2 2 0 01-2 2H3"/>',
+    prev: '<path d="M10 4L6 8l4 4"/>',
+    next: '<path d="M6 4l4 4-4 4"/>',
+    edit: '<path d="M10.5 3l2.5 2.5L6 12.5H3.5V10z"/><path d="M9 4.5L11.5 7"/>',
+    eye: '<path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/>',
+    plus: '<path d="M8 3.5v9"/><path d="M3.5 8h9"/>',
+    minus: '<path d="M3.5 8h9"/>',
+    eyeOff: '<path d="M2.5 2.5l11 11"/><path d="M6.6 4a6.6 6.6 0 011.4-.5c4 0 6.5 4.5 6.5 4.5a11 11 0 01-1.8 2.3"/><path d="M4.2 5.4A11 11 0 001.5 8S4 12.5 8 12.5c1 0 1.9-.3 2.7-.7"/>',
+    trash: '<path d="M3 4.5h10"/><path d="M6.5 4.5V3h3v1.5"/><path d="M4.5 4.5l.6 8.5h5.8l.6-8.5"/>',
+    undo: '<path d="M5.5 3.5L3 6l2.5 2.5"/><path d="M3 6h6.5a3.5 3.5 0 010 7H6"/>',
+    save: '<path d="M3 3h8l2 2v8H3z"/><path d="M5.5 3v3h4.5V3"/><rect x="5" y="9" width="6" height="4"/>',
+    file: '<path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/>'
   };
   function icon(name, cls) {
     var span = document.createElement("span");
@@ -194,5 +216,8 @@
     return { total: total };
   }
 
-  window.UmgBindings = { create: create, icon: icon };
+  // the icon of a widget class (layers list, cards)
+  function kindIcon(kind, cls) { return icon(KIND_ICONS[kind] || "widget", cls == null ? "kind" : cls); }
+
+  window.UmgBindings = { create: create, icon: icon, kindIcon: kindIcon };
 })();

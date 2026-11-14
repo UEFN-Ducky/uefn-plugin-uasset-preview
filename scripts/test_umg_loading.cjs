@@ -12,8 +12,8 @@ const example = { ok: true, spec: { name: 'Example', root: {}, animations: [], a
 function load({ embedded = false, offline = false, protocol = 'file:' } = {}) {
   const elements = new Map(), sent = [], listeners = new Set(), mounted = [];
   const element = id => {
-    if (!elements.has(id)) elements.set(id, { value: '1920x1080', hidden: false,
-      textContent: '', classList: { contains: () => false } });
+    if (!elements.has(id)) elements.set(id, { value: '1920x1080', hidden: false, textContent: '',
+      classList: { contains: () => false, toggle() {}, remove() {} }, replaceChildren() {}, appendChild() {}, contains: () => false });
     return elements.get(id);
   };
   const engine = { spec: example.spec, setViewport() {}, setHints() {}, setMuted() {}, on() {}, switchers: () => [],
@@ -21,10 +21,10 @@ function load({ embedded = false, offline = false, protocol = 'file:' } = {}) {
   const window = { setTimeout: () => 1, clearTimeout() {},
     addEventListener: (_, fn) => listeners.add(fn), removeEventListener: (_, fn) => listeners.delete(fn),
     UmgEngine: { create: (_, spec) => { mounted.push(spec.name); return engine; } },
-    UmgBindings: { create: () => ({ total: 0 }), icon: () => ({}) } };
+    UmgBindings: { create: () => ({ total: 0 }), icon: () => ({}), kindIcon: () => ({}) } };
   // the side panel's tabs
   const tab = () => ({ dataset: {}, classList: { toggle() {} }, replaceChildren() {} });
-  const tabs = [tab(), tab()];
+  const tabs = [tab(), tab(), tab()];
   const parent = embedded ? {} : window;
   parent.postMessage = message => {
     sent.push(message);
@@ -38,7 +38,7 @@ function load({ embedded = false, offline = false, protocol = 'file:' } = {}) {
   if (offline) window.__offlineDemo = example;
   vm.runInNewContext(source, { window, parent, location: { protocol, search: '' },
     crypto: { randomUUID: () => String(sent.length) }, URLSearchParams, document: { getElementById: element, createElement: () => ({}), createTextNode: () => ({}),
-      querySelectorAll: sel => (sel.includes('side-tabs') ? tabs : []), querySelector: () => ({ classList: { toggle() {} } }) } });
+      querySelectorAll: sel => (sel.includes('side-tabs') ? tabs : []), querySelector: () => ({ classList: { toggle() {} } }), addEventListener() {} } });
   return { elements, sent, mounted };
 }
 
