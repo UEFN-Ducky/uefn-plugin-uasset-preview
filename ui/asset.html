@@ -32,6 +32,16 @@
     .mat-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; color: var(--muted); font-size: 12px; }
     .mat-bar button { padding: 2px 8px; font-size: 12px; }
     .mat-bar button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+    .snd-wrap { flex: 1; min-height: 0; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+    .snd-wave { border: 1px solid var(--border); border-radius: 4px; }
+    .snd-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+    .snd-info, .snd-notes { color: var(--muted); font-size: 12px; }
+    .snd-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--border); }
+    .snd-list li { display: flex; align-items: center; gap: 8px; padding: 6px 2px; border-bottom: 1px solid var(--border); cursor: pointer; }
+    .snd-list li.missing { opacity: 0.55; cursor: default; }
+    .snd-list li button { padding: 1px 7px; }
+    .snd-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .snd-meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
     .note { padding: 6px 12px; color: var(--muted); border-bottom: 1px solid var(--border); font-size: 12px; }
     .banner { padding: 8px 12px; background: #2a2a14; color: #e6d27a; border-bottom: 1px solid var(--border); }
     .err { color: var(--err); padding: 8px 12px; }
@@ -64,6 +74,7 @@
     <div id="status" class="status">Loading…</div>
     <div class="img-wrap" id="img-wrap" hidden><img id="thumb" alt="preview" /></div>
     <div id="viewer" hidden></div>
+    <div class="snd-wrap" id="snd-wrap" hidden></div>
     <div class="mat-wrap" id="mat-wrap" hidden>
       <canvas id="mat"></canvas>
       <div class="mat-bar">
@@ -87,6 +98,7 @@
 <script src="viewer.bundle.js"></script>
 <script src="umg/material.js"></script>
 <script src="umg/engine.js"></script>
+<script src="sound.js"></script>
 <script>
 (function () {
   var CHANNEL = "uefn-plugin-ui";
@@ -299,8 +311,24 @@
                     error: live.material.error || "" } : null;
   };
 
+  // ---- sound: SoundWave / SoundCue played in the panel (ui/sound.js)
+  var sound = null;
+  async function startSound() {
+    if (!window.UassetSound) return "the sound player (sound.js) is missing";
+    var res = await rpc("load_sound_preview", { relative_path: filePath });
+    if (!res || !res.ok) return (res && res.error) || "the sound could not be read";
+    document.getElementById("status").hidden = true;
+    document.getElementById("img-wrap").hidden = true;
+    var host = document.getElementById("snd-wrap");
+    host.hidden = false;
+    sound = window.UassetSound.mount(host, res);
+    return "";
+  }
+  window.__soundPreview = function () { return sound ? sound.state() : null; };
+
   function showImage(url) {
     stopLiveMaterial();
+    if (sound) { sound.stop(); document.getElementById("snd-wrap").hidden = true; }
     document.getElementById("mat-wrap").hidden = true;
     if (live) document.getElementById("btn-live").hidden = false;
     document.getElementById("status").hidden = true;
@@ -370,8 +398,14 @@
       liveShown = !why;
       noteMaterial(why ? "Live material unavailable: " + why + ". Showing the UEFN thumbnail." : "");
     }
+    if (result && result.preview_kind === "sound") {
+      var whySound = "";
+      try { whySound = await startSound(); } catch (e) { whySound = e.message || String(e); }
+      liveShown = !whySound;
+      noteMaterial(whySound ? "Sound preview unavailable: " + whySound + "." : "");
+    }
     if (liveShown) {
-      // drawn live
+      // drawn live / sound player
     } else if (result && result.preview_url && (result.mode === "texture" || result.mode === "material" || result.mode === "image" || result.mode === "badge" || result.mode === "asset" || result.mode === "verse")) {
       showImage(result.preview_url);
     } else {

@@ -103,7 +103,7 @@ def _fill_image(asset: dict[str, Any], key: str, file: Path, mount: str, online:
 
 
 def _fill_sound(asset: dict[str, Any], key: str, file: Path, mount: str, online: bool) -> None:
-    target = _media_dir() / f"{_media_key(file)}.wav"
+    target = _media_dir() / f"{_media_key(file)}.uefn.wav"  # UEFN's export only (earlier .wav files were decoded wrong here)
     if not target.is_file():
         wav = None
         try:

@@ -86,8 +86,16 @@ def first_payload(pkg: Package) -> Optional[bytes]:
 
 
 def sound_wav(pkg: Package) -> Optional[bytes]:
-    payload = first_payload(pkg)
-    return payload if payload and payload[:4] == b"RIFF" else None
+    """Always None: a SoundWave's payload is not decoded here; callers export it from UEFN.
+
+    Checked on 2026-11-14 against UEFN's own WAV export of the same SoundWaves
+    (PLSTRENDING): the RIFF header and long silences come out right, but the samples do
+    not (JS_Sound 9 % of bytes identical, suonoruota 46 %): pyooz gets these Oodle streams
+    wrong, sometimes as a full-scale hiss, sometimes as something that looks like sound.
+    Texture sources decode correctly and are kept.
+    """
+    del pkg
+    return None
 
 
 def _texture_source(pkg: Package) -> dict:

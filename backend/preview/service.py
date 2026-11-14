@@ -108,6 +108,7 @@ def _annotate_preview(result: dict[str, Any], relative_path: str) -> dict[str, A
     result["supports_material_preview"] = kind == "material"
     result["supports_texture_preview"] = kind == "texture"
     result["supports_widget_tree"] = kind == "widget"
+    result["supports_sound_preview"] = kind == "sound"
     return result
 
 

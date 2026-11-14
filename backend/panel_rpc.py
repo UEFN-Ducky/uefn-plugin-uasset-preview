@@ -29,6 +29,12 @@ def load_material_shader(relative_path: str = "", **_kwargs: Any) -> dict[str, A
     return _load(str(relative_path or ""))
 
 
+def load_sound_preview(relative_path: str = "", **_kwargs: Any) -> dict[str, Any]:
+    from .preview.sound_preview import load_sound_preview as _load
+
+    return _load(str(relative_path or ""))
+
+
 def load_texture_preview(relative_path: str = "", **_kwargs: Any) -> dict[str, Any]:
     from .preview import load_texture_preview as _load
 
@@ -128,6 +134,7 @@ def register_panel_rpcs(api: Any) -> None:
     api.register_panel_rpc("load_static_mesh_preview", load_static_mesh_preview)
     api.register_panel_rpc("load_material_preview", load_material_preview)
     api.register_panel_rpc("load_material_shader", load_material_shader)
+    api.register_panel_rpc("load_sound_preview", load_sound_preview)
     api.register_panel_rpc("load_texture_preview", load_texture_preview)
     api.register_panel_rpc("load_widget_tree", load_widget_tree)
     api.register_panel_rpc("load_umg_preview", load_umg_preview)
