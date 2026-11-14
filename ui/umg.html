@@ -70,6 +70,8 @@
       background: none; color: var(--muted); font-size: 12.5px; }
     .dock-btn:hover { background: var(--hover); color: var(--text); }
     .dock-btn.on { background: var(--accent-soft); color: var(--accent); }
+    .dock-btn.zoom-step { padding: 0 7px; }
+    .dock-btn.zoom-val { min-width: 54px; justify-content: center; padding: 0 6px; font-variant-numeric: tabular-nums; color: var(--text); }
     .status { position: absolute; left: 12px; bottom: 14px; max-width: calc(50% - 150px); display: flex; align-items: center; gap: 7px;
       padding: 6px 10px; border-radius: 9px; background: rgba(23,23,28,.85); border: 1px solid var(--border); color: var(--muted);
       font-size: 12px; z-index: 3; }
@@ -256,6 +258,10 @@
         <span class="dock-sep"></span>
         <button type="button" class="dock-btn" id="btn-hints" title="Outline every clickable button"></button>
         <button type="button" class="dock-btn" id="btn-mute" title="Mute the widget's sounds"></button>
+        <span class="dock-sep"></span>
+        <button type="button" class="dock-btn zoom-step" id="zoom-out" title="Zoom out (Ctrl -)"></button>
+        <button type="button" class="dock-btn zoom-val" id="zoom-fit" title="Fit the screen in the panel (Ctrl 0). Wheel: zoom · right button, middle button or Space + drag: move the view · Ctrl 1: 100 %">100 %</button>
+        <button type="button" class="dock-btn zoom-step" id="zoom-in" title="Zoom in (Ctrl +)"></button>
       </div>
     </div>
     <aside class="panel side tab-main">
@@ -485,10 +491,13 @@
       else if (type === "bound" && d.event.indexOf("Click") >= 0) log("  plays " + d.animation + "  [" + d.widget + "]");
       else if (type === "select") { renderInspector(d.id ? d : null); markTree(d.id || 0); }
       else if (type === "edit") {
+        redoStack = [];
         d.changes.forEach(function (c) { undoStack.push({ id: d.node.id, field: c[0], before: c[2], group: undoGroup }); record(d.node, c[0], c[1]); });
         undoGroup++; renderInspector(engine.selection());
       }
-      else if (type === "pointer") $("hover").textContent = d.widget ? d.label + (d.label !== d.widget ? "  (" + d.widget + ")" : "") + "  ·  " + d.kind : "Move the mouse over the widget; click its buttons.";
+      else if (type === "open") { var area = document.querySelector("#insp textarea"); if (area) { area.focus(); area.select(); } }
+      else if (type === "view") $("zoom-fit").textContent = d.percent + " %";
+      else if (type === "pointer") $("hover").textContent = d.widget ? d.label + (d.label !== d.widget ? "  (" + d.widget + ")" : "") + "  ·  " + d.kind : idleStatus();
       else if (type === "animation" && scrubAnim && d.time != null) {
         var span = scrubAnim.end - scrubAnim.start;
         $("scrub").value = span > 0 ? Math.round(1000 * (d.time - scrubAnim.start) / span) : 0;
@@ -502,7 +511,7 @@
     if (/(^|[#&])stats/.test(location.hash)) engine.toggleStats(); // dev: open with the performance overlay
     engine.setEditMode(editing());
     engine.setDesignTime(editing()); // editing shows everything, as UEFN's designer does
-    renderInspector(null); refreshSaveBar(); renderTree(); undoStack = []; originals = {};
+    renderInspector(null); refreshSaveBar(); renderTree(); undoStack = []; redoStack = []; originals = {};
   }
 
   function applyRes() {
@@ -532,10 +541,17 @@
   }
 
   $("res").onchange = applyRes;
+  function idleStatus() {
+    return editing() ? "Click to select · drag to move · handles to resize · wheel to zoom" : "Move the mouse over the widget; click its buttons.";
+  }
+  $("zoom-in").onclick = function () { if (engine) engine.zoom("in"); };
+  $("zoom-out").onclick = function () { if (engine) engine.zoom("out"); };
+  $("zoom-fit").onclick = function () { if (engine) engine.zoom("fit"); };
   function dressDock() {
     var muted = $("btn-mute").classList.contains("on");
     $("btn-hints").replaceChildren(ico("pointer"), document.createTextNode("Buttons"));
     $("btn-mute").replaceChildren(ico(muted ? "muted" : "sound"), document.createTextNode(muted ? "Muted" : "Sound"));
+    $("zoom-in").replaceChildren(ico("plus")); $("zoom-out").replaceChildren(ico("minus"));
   }
   $("btn-hints").onclick = function () { this.classList.toggle("on"); if (engine) engine.setHints(this.classList.contains("on")); };
   $("btn-mute").onclick = function () { this.classList.toggle("on"); dressDock(); if (engine) engine.setMuted(this.classList.contains("on")); };
@@ -576,7 +592,7 @@
     refreshSaveBar();
   }
   // undo: one entry per changed field, with the value it had; entries of one gesture share a group
-  var undoStack = [], undoGroup = 1, originals = {};
+  var undoStack = [], redoStack = [], undoGroup = 1, originals = {};
   function valueOf(desc, field) {
     var parts = field.split("."), v = desc.fields[parts[0]];
     v = parts.length > 1 ? v[+parts[1]] : v;
@@ -586,20 +602,27 @@
   function change(node, field, value) {
     var before = valueOf(engine.describeNode(node.id), field), last = undoStack[undoStack.length - 1];
     if (!engine.setField(node.id, field, value)) return;
+    redoStack = [];
     // typing or dragging a slider keeps refining the same entry instead of adding one per keystroke
     if (!(last && last.id === node.id && last.field === field && last.live)) undoStack.push({ id: node.id, field: field, before: before, group: undoGroup++, live: true });
     record(node, field, value);
   }
-  function undo() {
-    if (!undoStack.length) return;
-    var group = undoStack[undoStack.length - 1].group;
-    while (undoStack.length && undoStack[undoStack.length - 1].group === group) {
-      var u = undoStack.pop(), desc = engine.describeNode(u.id);
-      engine.setField(u.id, u.field, u.before);
+  // undo moves a whole gesture (its entries share a group) to the redo stack, redo moves it back
+  function undo() { step(undoStack, redoStack, "before", "after"); }
+  function redo() { step(redoStack, undoStack, "after", "before"); }
+  function step(from, to, use, keep) {
+    if (!from.length) return;
+    var group = from[from.length - 1].group, moved = [];
+    while (from.length && from[from.length - 1].group === group) {
+      var u = from.pop(), desc = engine.describeNode(u.id), entry = { id: u.id, field: u.field, group: group };
+      entry[keep] = valueOf(desc, u.field); entry[use] = u[use];
+      engine.setField(u.id, u.field, u[use]);
       var key = desc.name + "|" + u.field;
-      if (key in originals && same(originals[key], u.before)) delete pending[key];
-      else pending[key] = { widget: desc.name, kind: desc.kind, field: u.field, value: u.before };
+      if (key in originals && same(originals[key], u[use])) delete pending[key];
+      else pending[key] = { widget: desc.name, kind: desc.kind, field: u.field, value: u[use] };
+      moved.unshift(entry);
     }
+    Array.prototype.push.apply(to, moved);
     refreshSaveBar(); renderInspector(engine.selection());
   }
   function renderTree() {
@@ -626,9 +649,14 @@
     if (engine && ev.shiftKey && (ev.key === "F" || ev.key === "f") && !/^(INPUT|TEXTAREA|SELECT)$/.test((ev.target && ev.target.tagName) || "")) {
       engine.toggleStats(); return; // performance overlay
     }
+    var typing = /^(INPUT|TEXTAREA|SELECT)$/.test((ev.target && ev.target.tagName) || ""), ctrl = ev.ctrlKey || ev.metaKey;
+    var zoomKey = { "0": "fit", "1": "actual", "=": "in", "+": "in", "-": "out" }[ev.key];
+    if (engine && ctrl && zoomKey && !typing) { ev.preventDefault(); engine.zoom(zoomKey); return; }
     if (!engine || !$("btn-edit").classList.contains("on")) return;
-    var typing = /^(INPUT|TEXTAREA|SELECT)$/.test((ev.target && ev.target.tagName) || "");
-    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "z" && !typing) { ev.preventDefault(); undo(); return; }
+    var key = ev.key.toLowerCase();
+    if (ctrl && !typing && (key === "y" || (key === "z" && ev.shiftKey))) { ev.preventDefault(); redo(); return; }
+    if (ctrl && !typing && key === "z") { ev.preventDefault(); undo(); return; }
+    if (ev.key === "Escape" && !typing) { engine.select(0); return; }
     var move = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[ev.key], sel = engine.selection();
     if (!move || typing || !sel) return;
     ev.preventDefault();
@@ -675,7 +703,11 @@
     host.innerHTML = ""; host.hidden = $("insp-title").hidden = !editing;
     if (!editing) return;
     if (undoStack.length) undoStack[undoStack.length - 1].live = false; // a new selection starts a new undo step
-    if (!node) { el("div", { className: "note hint", text: "Click a widget in the preview or in the layers. Drag to move, arrow keys to nudge (Shift: 10), Ctrl+Z to undo." }, host); return; }
+    if (!node) { el("div", { className: "note hint", text: "" }, host).append(
+      "Click a widget in the preview or in the layers.", el("br"),
+      "Drag it to move it (Shift: in a straight line), pull a handle to resize it (Shift: keep proportions, Alt: from the centre). ",
+      "Pink lines show it lining up with the others; hold Ctrl to place it freely.", el("br"),
+      "Arrow keys nudge (Shift: 10) · Ctrl+Z undo · Ctrl+Y redo · Esc deselect · wheel zoom · right button drags the view."); return; }
     var f = node.fields;
     var who = el("div", { className: "who" }, host);
     who.appendChild(UI.kindIcon(node.kind, ""));
@@ -750,6 +782,7 @@
     document.querySelector(".app").classList.toggle("editing", on);
     if (on && sideTab === "log") showTab("main"); else labelTabs();
     renderInspector(null); refreshSaveBar(); refreshUndo(); renderTree();
+    $("hover").textContent = idleStatus();
   }
   $("btn-edit").onclick = function () { setEditing(true); };
   $("mode-play").onclick = function () { setEditing(false); };

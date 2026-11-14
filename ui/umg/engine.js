@@ -106,7 +106,9 @@
     function anyPlaying() { return players.some(function (p) { return p.state === "playing"; }); }
     var audio = null, audioBuffers = {}, muted = false;
     var showHints = false;
-    var editMode = false, selected = null, drag = null, highlighted = null;
+    var editMode = false, selected = null, drag = null, highlighted = null, editHover = null;
+    // the view: zoom 1 = fitted to the canvas; pan in canvas pixels (wheel zooms, right/middle/Space-drag pans)
+    var view = { zoom: 1, x: 0, y: 0 }, fitScale = 1, baseMatrix = new DOMMatrix(), paintId = 0, shownPercent = 0, spaceDown = false;
 
     function emit(type, detail) { listeners.forEach(function (fn) { fn(type, detail || {}); }); }
     function invalidate() { dirty = true; if (!raf && !disposed) raf = requestAnimationFrame(frame); }
@@ -584,6 +586,7 @@
       var angle = a.angle != null ? a.angle : x.angle;
       var opacity = alpha * (a.opacity != null ? a.opacity : n.opacity) * (n.enabled ? 1 : 0.5);
       ctx.save();
+      n.pm = ctx.getTransform(); // the parent's space: where this widget's slot offsets live
       ctx.translate(r.x, r.y);
       if (n.layoutScale !== 1) ctx.scale(n.layoutScale, n.layoutScale);
       if (pressed === n && n.kind === "Button" && !n.children.length) { ctx.translate(r.w / 2, r.h / 2); ctx.scale(0.97, 0.97); ctx.translate(-r.w / 2, -r.h / 2); }
@@ -593,6 +596,7 @@
       if (sh[0] || sh[1]) ctx.transform(1, Math.tan(sh[1] * Math.PI / 180), Math.tan(sh[0] * Math.PI / 180), 1, 0, 0);
       ctx.scale(s[0], s[1]);
       ctx.translate(-px, -py);
+      n.wm = ctx.getTransform(); n.pid = paintId;
       if (vis !== "Hidden" && opacity > 0.001) {
         ctx.globalAlpha = opacity;
         painted.push({ node: n, matrix: ctx.getTransform() });
@@ -661,7 +665,10 @@
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       var fit = Math.min(canvas.width / viewport.w, canvas.height / viewport.h);
       var ox = (canvas.width - viewport.w * fit) / 2, oy = (canvas.height - viewport.h * fit) / 2;
-      ctx.setTransform(fit * dpi, 0, 0, fit * dpi, ox, oy);
+      fitScale = fit;
+      var z = view.zoom;
+      ctx.setTransform(fit * dpi * z, 0, 0, fit * dpi * z, ox * z + view.x, oy * z + view.y);
+      baseMatrix = ctx.getTransform(); paintId++;
       layout();
       ctx.save();
       ctx.beginPath(); ctx.rect(0, 0, layoutSize.w, layoutSize.h); ctx.clip();
@@ -691,19 +698,9 @@
           ctx.lineWidth = 2 * dpr; ctx.strokeStyle = "#7dd3fc"; ctx.stroke();
         }
       }
-      if (editMode && selected) {
-        var entry = null;
-        for (var pi = painted.length - 1; pi >= 0; pi--) if (painted[pi].node === selected) { entry = painted[pi]; break; }
-        if (entry) {
-          var corners = [[0, 0], [selected.rect.w, 0], [selected.rect.w, selected.rect.h], [0, selected.rect.h]]
-            .map(function (p) { return entry.matrix.transformPoint(new DOMPoint(p[0], p[1])); });
-          ctx.beginPath(); ctx.moveTo(corners[0].x, corners[0].y);
-          corners.slice(1).forEach(function (p) { ctx.lineTo(p.x, p.y); });
-          ctx.closePath(); ctx.lineWidth = 2 * dpr; ctx.strokeStyle = "#ffb020"; ctx.stroke();
-          ctx.fillStyle = "#ffb020";
-          corners.forEach(function (p) { ctx.fillRect(p.x - 3 * dpr, p.y - 3 * dpr, 6 * dpr, 6 * dpr); });
-        }
-      }
+      if (editMode) drawEditOverlay(dpr);
+      var pct = Math.round(view.zoom * fit / dpr * 100);
+      if (pct !== shownPercent) { shownPercent = pct; emit("view", { percent: pct }); }
       if (hoverAt && players.some(function (p) { return p.dir > 0 && p.time > p.anim.start; })) { hoverLatency = performance.now() - hoverAt; hoverAt = 0; }
       frameTimes.push(performance.now() - workStart); if (frameTimes.length > 60) frameTimes.shift();
       perfShown = perf; perf = { render: 0, copy: 0, count: 0 };
@@ -750,45 +747,255 @@
       tintCache = {}; invalidate();
       return true;
     }
+    function canvasPoint(ev) { // pointer position in canvas pixels
+      var b = canvas.getBoundingClientRect();
+      return new DOMPoint((ev.clientX - b.left) * canvas.width / b.width, (ev.clientY - b.top) * canvas.height / b.height);
+    }
     function hitAny(clientX, clientY) { // edit mode: anything drawn can be picked, click-through or not
-      var b = canvas.getBoundingClientRect(), sx = canvas.width / b.width, sy = canvas.height / b.height;
-      var pt = new DOMPoint((clientX - b.left) * sx, (clientY - b.top) * sy);
+      var pt = canvasPoint({ clientX: clientX, clientY: clientY });
       for (var i = painted.length - 1; i >= 0; i--) {
         var e = painted[i];
-        if (!hitTarget(e.node)) continue;
-        var local = e.matrix.inverse().transformPoint(pt);
-        if (local.x >= 0 && local.y >= 0 && local.x <= e.node.rect.w && local.y <= e.node.rect.h) return e.node;
+        if (hitTarget(e.node) && inside(e.node, e.matrix, pt)) return e.node;
       }
       return null;
     }
+    function inside(n, m, pt) {
+      var local = m.inverse().transformPoint(pt);
+      return local.x >= 0 && local.y >= 0 && local.x <= n.rect.w && local.y <= n.rect.h;
+    }
+    function shown(n) { return !!(n && n.rect && n.wm && n.pid === paintId); } // drawn in the last frame
+    function quad(n, m) {
+      m = m || n.wm;
+      return [[0, 0], [n.rect.w, 0], [n.rect.w, n.rect.h], [0, n.rect.h]].map(function (p) { return m.transformPoint(new DOMPoint(p[0], p[1])); });
+    }
+    function bounds(pts) {
+      var xs = pts.map(function (p) { return p.x; }), ys = pts.map(function (p) { return p.y; });
+      return { l: Math.min.apply(null, xs), t: Math.min.apply(null, ys), r: Math.max.apply(null, xs), b: Math.max.apply(null, ys) };
+    }
+    function toLocal(m, dx, dy) { // a canvas-pixel movement, in the units of the space m draws
+      var inv = m.inverse(), a = inv.transformPoint(new DOMPoint(0, 0)), b = inv.transformPoint(new DOMPoint(dx, dy));
+      return [b.x - a.x, b.y - a.y];
+    }
+    function within(n, top) { for (var c = n; c; c = c.parent) if (c === top) return true; return false; }
+    function px() { return Math.min(window.devicePixelRatio || 1, 2); } // canvas pixels per CSS pixel
+    // The eight handles: [hx, hy], -1 = left/top edge, 1 = right/bottom, 0 = the middle of that side.
+    var HANDLES = [[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]];
+    function handlePoints(n) {
+      var q = quad(n), big = Math.hypot(q[1].x - q[0].x, q[1].y - q[0].y) > 36 * px() && Math.hypot(q[3].x - q[0].x, q[3].y - q[0].y) > 36 * px();
+      return HANDLES.filter(function (h) { return big || (h[0] && h[1]); }).map(function (h) {
+        return { h: h, p: n.wm.transformPoint(new DOMPoint((h[0] + 1) / 2 * n.rect.w, (h[1] + 1) / 2 * n.rect.h)) };
+      });
+    }
+    function handleAt(pt) {
+      if (!shown(selected)) return null;
+      var hits = handlePoints(selected).filter(function (e) { return Math.abs(e.p.x - pt.x) <= 7 * px() && Math.abs(e.p.y - pt.y) <= 7 * px(); });
+      return hits.length ? hits[0].h : null;
+    }
+    function handleCursor(h) {
+      if (!h[0]) return "ns-resize";
+      if (!h[1]) return "ew-resize";
+      return h[0] === h[1] ? "nwse-resize" : "nesw-resize";
+    }
+    // A canvas slot is resized through its size (Offsets); anything else through its render Scale.
+    function sizeMode(n) { return n.slot.type === "canvas" && !n.slot.auto_size; }
+    // Smart guides: the edges and centres of everything else on screen, and of the screen itself.
+    function snapTargets(n) {
+      var xs = [], ys = [];
+      function add(b) {
+        [b.l, (b.l + b.r) / 2, b.r].forEach(function (v) { xs.push({ v: v, lo: b.t, hi: b.b }); });
+        [b.t, (b.t + b.b) / 2, b.b].forEach(function (v) { ys.push({ v: v, lo: b.l, hi: b.r }); });
+      }
+      add(bounds([[0, 0], [layoutSize.w, 0], [layoutSize.w, layoutSize.h], [0, layoutSize.h]].map(function (p) { return baseMatrix.transformPoint(new DOMPoint(p[0], p[1])); })));
+      painted.forEach(function (e) {
+        if (e.node === spec.root || within(e.node, n) || !e.node.rect || e.node.rect.w < 1 || e.node.rect.h < 1) return;
+        add(bounds(quad(e.node, e.matrix)));
+      });
+      return { x: xs, y: ys };
+    }
+    function snapAxis(lines, targets) { // the smallest move that lays one of lines on a target, within 6 px
+      var best = null;
+      lines.forEach(function (m) {
+        targets.forEach(function (t) { var d = t.v - m; if (Math.abs(d) <= 6 * px() && (best === null || Math.abs(d) < Math.abs(best))) best = d; });
+      });
+      return best || 0;
+    }
+    function guidesFor(box, targets, axes) { // the guide lines to draw for a box that has just snapped
+      var out = [];
+      [[box.l, (box.l + box.r) / 2, box.r, "x"], [box.t, (box.t + box.b) / 2, box.b, "y"]].forEach(function (axis) {
+        var key = axis[3], lo = key === "x" ? box.t : box.l, hi = key === "x" ? box.b : box.r;
+        if (axes && !axes[key]) return;
+        targets[key].forEach(function (t) {
+          if (axis.slice(0, 3).some(function (v) { return Math.abs(v - t.v) < 0.75; })) out.push({ axis: key, v: t.v, lo: Math.min(lo, t.lo), hi: Math.max(hi, t.hi) });
+        });
+      });
+      return out;
+    }
+    function round(v, step) { return Math.round(v / step) * step; }
     function editDown(ev) {
+      var pt = canvasPoint(ev), h = handleAt(pt);
+      if (h) { startDrag("resize", selected, pt, h); return; }
       var target = hitAny(ev.clientX, ev.clientY), node = target ? owner(target) : null;
+      // a press inside the selection moves it; a click there without moving picks what is under the cursor
+      if (shown(selected) && inside(selected, selected.wm, pt)) { startDrag("move", selected, pt, null); drag.clickPick = node; return; }
       selected = node;
       emit("select", node ? describe(node) : {});
-      if (node) {
-        // one screen pixel in layout units (ignores rotation/scale of parents: good enough to drag)
-        var b = canvas.getBoundingClientRect(), fit = Math.min(b.width / viewport.w, b.height / viewport.h);
-        var unit = (layoutSize.w / viewport.w) / fit, canvasSlot = node.slot.type === "canvas";
-        drag = { node: node, x: ev.clientX, y: ev.clientY, unit: unit, canvasSlot: canvasSlot, moved: false,
-          start: canvasSlot ? node.slot.offsets.slice(0, 2) : node.xform.t.slice() };
-      }
+      if (node && shown(node)) startDrag("move", node, pt, null);
       invalidate();
     }
+    function startDrag(kind, node, pt, h) {
+      drag = { kind: kind, node: node, x: pt.x, y: pt.y, h: h, moved: false, canvasSlot: node.slot.type === "canvas", size: sizeMode(node),
+        box: bounds(quad(node)), targets: snapTargets(node), guides: [], pm: node.pm, wm: node.wm,
+        rect: { w: node.rect.w, h: node.rect.h }, offsets: node.slot.offsets ? node.slot.offsets.slice() : null,
+        t: node.xform.t.slice(), s: node.xform.s.slice() };
+    }
     function editMove(ev) {
-      if (!drag) { canvas.style.cursor = hitAny(ev.clientX, ev.clientY) ? "move" : "default"; return; }
-      var dx = (ev.clientX - drag.x) * drag.unit, dy = (ev.clientY - drag.y) * drag.unit;
-      if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 2) return;
-      drag.moved = true;
-      var x = Math.round(drag.start[0] + dx), y = Math.round(drag.start[1] + dy);
-      if (drag.canvasSlot) { drag.node.slot.offsets[0] = x; drag.node.slot.offsets[1] = y; } else drag.node.xform.t = [x, y];
+      var pt = canvasPoint(ev);
+      if (!drag) {
+        var h = handleAt(pt), target = h ? null : hitAny(ev.clientX, ev.clientY), node = target ? owner(target) : null;
+        canvas.style.cursor = spaceDown ? "grab" : h ? handleCursor(h) : (node || (shown(selected) && inside(selected, selected.wm, pt))) ? "move" : "default";
+        if (node !== editHover) { editHover = node; invalidate(); }
+        emit("pointer", { widget: node ? node.name : "", label: node ? node.label : "", kind: node ? node.kind : "" });
+        return;
+      }
+      var sd = [pt.x - drag.x, pt.y - drag.y];
+      if (!drag.moved && Math.hypot(sd[0], sd[1]) < 3 * px()) return;
+      drag.moved = true; editHover = null;
+      var snap = !(ev.ctrlKey || ev.metaKey); // Ctrl: no smart guides, as in Photoshop
+      if (drag.kind === "move") moveTo(ev, sd, snap); else resizeTo(ev, sd, snap);
       invalidate();
+    }
+    function moveTo(ev, sd, snap) {
+      var n = drag.node, b = drag.box;
+      if (ev.shiftKey) { if (Math.abs(sd[0]) > Math.abs(sd[1])) sd[1] = 0; else sd[0] = 0; } // Shift: straight lines only
+      drag.guides = [];
+      if (snap) {
+        var box = function () { return { l: b.l + sd[0], t: b.t + sd[1], r: b.r + sd[0], b: b.b + sd[1] }; }, m = box();
+        if (!(ev.shiftKey && !sd[0])) sd[0] += snapAxis([m.l, (m.l + m.r) / 2, m.r], drag.targets.x);
+        if (!(ev.shiftKey && !sd[1])) sd[1] += snapAxis([m.t, (m.t + m.b) / 2, m.b], drag.targets.y);
+        drag.guides = guidesFor(box(), drag.targets);
+      }
+      var d = toLocal(drag.pm, sd[0], sd[1]);
+      if (drag.canvasSlot) { n.slot.offsets[0] = Math.round(drag.offsets[0] + d[0]); n.slot.offsets[1] = Math.round(drag.offsets[1] + d[1]); }
+      else n.xform.t = [Math.round(drag.t[0] + d[0] / (n.layoutScale || 1)), Math.round(drag.t[1] + d[1] / (n.layoutScale || 1))];
+    }
+    function resizeTo(ev, sd, snap) {
+      var n = drag.node, h = drag.h, b = drag.box, centred = ev.altKey, keep = ev.shiftKey && h[0] && h[1];
+      if (snap) { // the edges being pulled stick to the guides too
+        if (h[0]) sd[0] += snapAxis([(h[0] < 0 ? b.l : b.r) + sd[0]], drag.targets.x);
+        if (h[1]) sd[1] += snapAxis([(h[1] < 0 ? b.t : b.b) + sd[1]], drag.targets.y);
+      }
+      var local = toLocal(drag.wm, sd[0], sd[1]), size0 = [drag.rect.w, drag.rect.h], size = size0.slice();
+      [0, 1].forEach(function (i) { if (h[i]) size[i] = size0[i] + h[i] * local[i] * (centred ? 2 : 1); });
+      if (keep && size0[0] > 0 && size0[1] > 0) { // Shift on a corner: keep the proportions
+        var fx = size[0] / size0[0], fy = size[1] / size0[1], k = Math.abs(fx - 1) > Math.abs(fy - 1) ? fx : fy;
+        size = [size0[0] * k, size0[1] * k];
+      }
+      size = size.map(function (v) { return Math.max(1, Math.round(v)); });
+      [0, 1].forEach(function (i) {
+        if (!h[i]) return;
+        // how far each edge moves, in the widget's own units: the far edge stays put (Alt: both, from the centre)
+        var grow = size[i] - size0[i], dMin = centred ? -grow / 2 : h[i] < 0 ? -grow : 0, dMax = centred ? grow / 2 : h[i] > 0 ? grow : 0;
+        if (drag.size) {
+          var s = n.slot, o = drag.offsets;
+          if (s.anchor_min[i] === s.anchor_max[i]) { s.offsets[i] = Math.round(o[i] + dMin + s.align[i] * grow); s.offsets[i + 2] = size[i]; }
+          else { s.offsets[i] = Math.round(o[i] + dMin); s.offsets[i + 2] = Math.round(o[i + 2] - dMax); }
+        } else { // render Scale, with the translation moved so the far edge stays where it was
+          var s0 = drag.s[i], pivot = n.pivot[i] * size0[i], left = pivot * (1 - s0) + drag.t[i] + dMin * s0;
+          n.xform.s[i] = round(s0 * size[i] / size0[i], 0.001);
+          n.xform.t[i] = round(left - pivot * (1 - n.xform.s[i]), 0.1);
+        }
+      });
+      drag.guides = snap ? guidesFor(predictedBox(), drag.targets, { x: !!h[0], y: !!h[1] }) : [];
+    }
+    function predictedBox() { // the dragged widget's box as the next frame will draw it
+      var n = drag.node;
+      layout();
+      var m = n.pm.translate(n.rect.x, n.rect.y);
+      if (n.layoutScale !== 1) m = m.scale(n.layoutScale, n.layoutScale);
+      var t = n.xform.t, s = n.xform.s, p = [n.pivot[0] * n.rect.w, n.pivot[1] * n.rect.h];
+      m = m.translate(p[0] + t[0], p[1] + t[1]);
+      if (n.xform.angle) m = m.rotate(n.xform.angle);
+      m = m.scale(s[0], s[1]).translate(-p[0], -p[1]);
+      return bounds(quad(n, m));
     }
     function editUp() {
       if (!drag) return;
-      var d = drag; drag = null;
-      if (!d.moved) return;
-      if (d.canvasSlot) emit("edit", { node: describe(d.node), changes: [["offsets.0", d.node.slot.offsets[0], d.start[0]], ["offsets.1", d.node.slot.offsets[1], d.start[1]]] });
-      else emit("edit", { node: describe(d.node), changes: [["translation", d.node.xform.t.slice(), d.start.slice()]] });
+      var d = drag, n = d.node; drag = null;
+      invalidate();
+      if (!d.moved) {
+        if (d.clickPick !== undefined && d.clickPick !== selected) { selected = d.clickPick; emit("select", selected ? describe(selected) : {}); }
+        return;
+      }
+      var changes = [];
+      if (d.offsets) [0, 1, 2, 3].forEach(function (i) { if (n.slot.offsets[i] !== d.offsets[i]) changes.push(["offsets." + i, n.slot.offsets[i], d.offsets[i]]); });
+      if (!same2(n.xform.t, d.t)) changes.push(["translation", n.xform.t.slice(), d.t.slice()]);
+      if (!same2(n.xform.s, d.s)) changes.push(["scale", n.xform.s.slice(), d.s.slice()]);
+      if (changes.length) emit("edit", { node: describe(n), changes: changes });
+    }
+    function same2(a, b) { return a[0] === b[0] && a[1] === b[1]; }
+    function pill(text, x, y, dpr) { // a small label on the canvas, centred on x, its top at y
+      ctx.font = Math.round(11 * dpr) + "px ui-sans-serif, system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      var w = ctx.measureText(text).width + 12 * dpr, hgt = 18 * dpr;
+      x = Math.max(w / 2 + 2, Math.min(canvas.width - w / 2 - 2, x)); y = Math.max(2, Math.min(canvas.height - hgt - 2, y));
+      ctx.fillStyle = "#ff8a00"; ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(x - w / 2, y, w, hgt, 4 * dpr); else ctx.rect(x - w / 2, y, w, hgt);
+      ctx.fill(); ctx.fillStyle = "#fff"; ctx.fillText(text, x, y + hgt / 2 + 0.5);
+    }
+    function outline(pts, width, color) {
+      ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+      pts.slice(1).forEach(function (p) { ctx.lineTo(p.x, p.y); });
+      ctx.closePath(); ctx.lineWidth = width; ctx.strokeStyle = color; ctx.stroke();
+    }
+    function fmt(v) { return String(Math.round(v * 100) / 100); }
+    function drawEditOverlay(dpr) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      if (editHover && editHover !== selected && shown(editHover)) outline(quad(editHover), 1 * dpr, "#4da3ff");
+      if (!shown(selected)) return;
+      var n = selected, q = quad(n), box = bounds(q), moving = drag && drag.moved && drag.kind === "move";
+      if (drag && drag.moved) drag.guides.forEach(function (g) { // smart guides, in Photoshop's magenta
+        var v = Math.round(g.v) + 0.5;
+        ctx.beginPath();
+        if (g.axis === "x") { ctx.moveTo(v, g.lo); ctx.lineTo(v, g.hi); } else { ctx.moveTo(g.lo, v); ctx.lineTo(g.hi, v); }
+        ctx.lineWidth = 1 * dpr; ctx.strokeStyle = "#ff2bd6"; ctx.stroke();
+      });
+      outline(q, 1.5 * dpr, "#ff8a00");
+      if (!moving) handlePoints(n).forEach(function (e) {
+        var r = 4 * dpr;
+        ctx.fillStyle = "#fff"; ctx.fillRect(e.p.x - r, e.p.y - r, 2 * r, 2 * r);
+        ctx.lineWidth = 1.5 * dpr; ctx.strokeStyle = "#ff8a00"; ctx.strokeRect(e.p.x - r, e.p.y - r, 2 * r, 2 * r);
+      });
+      var scaled = n.xform.s[0] !== 1 || n.xform.s[1] !== 1, label;
+      if (moving) label = drag.canvasSlot ? "X " + fmt(n.slot.offsets[0]) + "   Y " + fmt(n.slot.offsets[1]) : "Offset " + fmt(n.xform.t[0]) + ", " + fmt(n.xform.t[1]);
+      else if (drag && drag.moved && !drag.size) label = "Scale " + fmt(n.xform.s[0]) + " × " + fmt(n.xform.s[1]);
+      else label = fmt(n.rect.w) + " × " + fmt(n.rect.h) + (scaled ? "   scale " + fmt(n.xform.s[0]) + " × " + fmt(n.xform.s[1]) : "");
+      pill(label, (box.l + box.r) / 2, box.b + 8 * dpr, dpr);
+    }
+    // ---- the view: zoom and pan ----------------------------------------
+    function zoomAt(factor, cx, cy) {
+      var z = Math.min(32, Math.max(0.1, view.zoom * factor)), k = z / view.zoom;
+      view.x = cx - (cx - view.x) * k; view.y = cy - (cy - view.y) * k; view.zoom = z;
+      invalidate();
+    }
+    function onWheel(ev) { // the wheel zooms towards the cursor, as in UEFN's designer
+      ev.preventDefault();
+      var pt = canvasPoint(ev), dy = ev.deltaMode === 1 ? ev.deltaY * 16 : ev.deltaY;
+      zoomAt(Math.exp(-dy * 0.0015), pt.x, pt.y);
+    }
+    function panDown(ev) { // right or middle button, or the left one with Space held: move the view
+      var pt = canvasPoint(ev);
+      drag = { kind: "pan", x: pt.x, y: pt.y, vx: view.x, vy: view.y };
+      canvas.style.cursor = "grabbing";
+      try { canvas.setPointerCapture(ev.pointerId); } catch (e) {}
+    }
+    function panMove(ev) {
+      var pt = canvasPoint(ev);
+      view.x = drag.vx + pt.x - drag.x; view.y = drag.vy + pt.y - drag.y; invalidate();
+    }
+    function onKey(ev) { // Space held over the preview: drag to move the view
+      if (ev.key !== " " || /^(INPUT|TEXTAREA|SELECT)$/.test((ev.target && ev.target.tagName) || "") || !canvas.matches(":hover")) return;
+      ev.preventDefault();
+      spaceDown = ev.type === "keydown";
+      if (!drag) canvas.style.cursor = spaceDown ? "grab" : "default";
     }
 
     // ---- input ----------------------------------------------------------
@@ -814,6 +1021,7 @@
       return null;
     }
     function onMove(ev) {
+      if (drag && drag.kind === "pan") { panMove(ev); return; }
       if (editMode) { editMove(ev); return; }
       var target = hit(ev.clientX, ev.clientY), button = target ? buttonOf(target) : null;
       canvas.style.cursor = button ? "pointer" : "default";
@@ -826,8 +1034,9 @@
       emit("pointer", { widget: target ? target.name : "", label: target ? target.label : "", kind: target ? target.kind : "" });
     }
     function onDown(ev) {
+      if (ev.button === 1 || ev.button === 2 || (ev.button === 0 && spaceDown)) { ev.preventDefault(); panDown(ev); return; }
       if (ev.button !== 0) return;
-      if (editMode) { editDown(ev); return; }
+      if (editMode) { editDown(ev); if (drag) try { canvas.setPointerCapture(ev.pointerId); } catch (e) {} return; }
       audioAllowed = true;
       resumeAudio();
       var target = hit(ev.clientX, ev.clientY);
@@ -835,6 +1044,7 @@
       if (pressed) { emit("press", { widget: pressed.name, label: pressed.label }); uiSound(pressed, "pressed"); fire(pressed, "press"); invalidate(); }
     }
     function onUp(ev) {
+      if (drag && drag.kind === "pan") { drag = null; canvas.style.cursor = spaceDown ? "grab" : "default"; return; }
       if (editMode) { editUp(); return; }
       if (!pressed) return;
       var target = hit(ev.clientX, ev.clientY), was = pressed;
@@ -845,6 +1055,7 @@
       invalidate();
     }
     function onLeave() {
+      if (editHover && !drag) { editHover = null; invalidate(); }
       if (!hovered && !pressed) return;
       if (hovered) fire(hovered, "unhover");
       hovered = null; pressed = null; invalidate();
@@ -874,6 +1085,12 @@
     canvas.addEventListener("pointerdown", onDown);
     window.addEventListener("pointerup", onUp);
     canvas.addEventListener("pointerleave", onLeave);
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    function onMenu(ev) { ev.preventDefault(); } // the right button moves the view
+    function onDouble() { if (editMode && selected) emit("open", describe(selected)); } // e.g. type into a text
+    canvas.addEventListener("contextmenu", onMenu);
+    canvas.addEventListener("dblclick", onDouble);
+    window.addEventListener("keydown", onKey); window.addEventListener("keyup", onKey);
     var resizeObserver = new ResizeObserver(invalidate);
     resizeObserver.observe(canvas);
 
@@ -1023,7 +1240,15 @@
     var api = {
       spec: spec,
       on: function (fn) { listeners.push(fn); },
-      setViewport: function (w, h) { viewport = { w: w, h: h }; invalidate(); },
+      setViewport: function (w, h) { viewport = { w: w, h: h }; view = { zoom: 1, x: 0, y: 0 }; invalidate(); },
+      // "fit" (the whole screen in the panel), "actual" (100 %: one screen pixel per pixel), "in", "out"
+      zoom: function (how) {
+        var cx = canvas.width / 2, cy = canvas.height / 2;
+        if (how === "fit") { view = { zoom: 1, x: 0, y: 0 }; invalidate(); }
+        else if (how === "actual") zoomAt(px() / fitScale / view.zoom, cx, cy);
+        else zoomAt(how === "in" ? 1.25 : 0.8, cx, cy);
+        return shownPercent;
+      },
       setHints: function (on) { showHints = !!on; invalidate(); },
       stats: function () {
         var avg = function (x) { return x.length ? x.reduce(function (t, v) { return t + v; }, 0) / x.length : 0; };
@@ -1033,8 +1258,14 @@
       },
       toggleStats: function () { showStats = !showStats; frameTimes = []; frameGaps = []; invalidate(); return showStats; },
       setDesignTime: function (on) { designTime = !!on; invalidate(); },
-      setEditMode: function (on) { editMode = !!on; drag = null; hovered = null; pressed = null; if (!on) selected = null; canvas.style.cursor = "default"; invalidate(); },
+      setEditMode: function (on) { editMode = !!on; drag = null; hovered = null; pressed = null; editHover = null; if (!on) selected = null; canvas.style.cursor = "default"; invalidate(); },
       selection: function () { return selected ? describe(selected) : null; },
+      screenBox: function (id) { // where a widget is drawn, in CSS pixels of the page (tests, tools)
+        var n = allNodes.filter(function (x) { return x.id === id; })[0], b = canvas.getBoundingClientRect(), k = b.width / canvas.width;
+        if (!shown(n)) return null;
+        var q = bounds(quad(n));
+        return { left: b.left + q.l * k, top: b.top + q.t * k, right: b.left + q.r * k, bottom: b.top + q.b * k };
+      },
       describeNode: function (id) { var n = allNodes.filter(function (x) { return x.id === id; })[0]; return n ? describe(n) : null; },
       select: function (id) {
         var n = allNodes.filter(function (x) { return x.id === id; })[0];
@@ -1102,6 +1333,8 @@
         disposed = true; removePlayers(function () { return true; }); resizeObserver.disconnect();
         canvas.removeEventListener("pointermove", onMove); canvas.removeEventListener("pointerdown", onDown);
         window.removeEventListener("pointerup", onUp); canvas.removeEventListener("pointerleave", onLeave);
+        canvas.removeEventListener("wheel", onWheel); canvas.removeEventListener("contextmenu", onMenu); canvas.removeEventListener("dblclick", onDouble);
+        window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKey);
         if (audio) audio.close();
       }
     };
