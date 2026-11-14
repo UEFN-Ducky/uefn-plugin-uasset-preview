@@ -1070,6 +1070,7 @@
         if (n && n.children.length) { n.props.active = (index + n.children.length) % n.children.length; invalidate(); return n.props.active; }
         return 0;
       },
+      kindOf: function (name) { var n = nodesByName[name]; return n ? n.kind : ""; },
       highlight: function (name) { // outline this blueprint's widget called name (null: none)
         var n = name ? nodesByName[name] : null;
         if (n !== highlighted) { highlighted = n || null; invalidate(); }
