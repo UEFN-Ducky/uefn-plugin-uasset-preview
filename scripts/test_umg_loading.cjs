@@ -17,10 +17,14 @@ function load({ embedded = false, offline = false, protocol = 'file:' } = {}) {
     return elements.get(id);
   };
   const engine = { spec: example.spec, setViewport() {}, setHints() {}, setMuted() {}, on() {}, switchers: () => [],
-    setEditMode() {}, setDesignTime() {}, tree: () => [], toggleStats() {}, selection: () => null, images: () => [], materialReport: () => ({ shaders: 0, failed: [] }) };
+    setEditMode() {}, setDesignTime() {}, tree: () => [], toggleStats() {}, highlight() {}, selection: () => null, images: () => [], materialReport: () => ({ shaders: 0, failed: [] }) };
   const window = { setTimeout: () => 1, clearTimeout() {},
     addEventListener: (_, fn) => listeners.add(fn), removeEventListener: (_, fn) => listeners.delete(fn),
-    UmgEngine: { create: (_, spec) => { mounted.push(spec.name); return engine; } } };
+    UmgEngine: { create: (_, spec) => { mounted.push(spec.name); return engine; } },
+    UmgBindings: { create: () => ({ total: 0 }), icon: () => ({}) } };
+  // the side panel's tabs
+  const tab = () => ({ dataset: {}, classList: { toggle() {} }, replaceChildren() {} });
+  const tabs = [tab(), tab()];
   const parent = embedded ? {} : window;
   parent.postMessage = message => {
     sent.push(message);
@@ -33,7 +37,8 @@ function load({ embedded = false, offline = false, protocol = 'file:' } = {}) {
   };
   if (offline) window.__offlineDemo = example;
   vm.runInNewContext(source, { window, parent, location: { protocol, search: '' },
-    crypto: { randomUUID: () => String(sent.length) }, URLSearchParams, document: { getElementById: element } });
+    crypto: { randomUUID: () => String(sent.length) }, URLSearchParams, document: { getElementById: element, createElement: () => ({}), createTextNode: () => ({}),
+      querySelectorAll: sel => (sel.includes('side-tabs') ? tabs : []), querySelector: () => ({ classList: { toggle() {} } }) } });
   return { elements, sent, mounted };
 }
 

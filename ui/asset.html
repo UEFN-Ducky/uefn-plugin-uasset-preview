@@ -97,7 +97,6 @@
 </div>
 <script src="viewer.bundle.js"></script>
 <script src="umg/material.js"></script>
-<script src="umg/engine.js"></script>
 <script src="sound.js"></script>
 <script>
 (function () {
@@ -191,11 +190,7 @@
       if (!asset || !asset.url) { resolve(null); return; }
       var img = new Image();
       img.crossOrigin = "anonymous"; // the panel is sandboxed: pixels are readable only through CORS
-      img.onload = function () {
-        // Content Browser thumbnails bake a grey checkerboard where the texture is transparent
-        var clean = asset.quality === "thumbnail" && window.UmgEngine && window.UmgEngine.removeChecker;
-        resolve(clean ? window.UmgEngine.removeChecker(img) : img);
-      };
+      img.onload = function () { resolve(img); }; // a thumbnail keeps its baked checkerboard (the app decodes full textures)
       img.onerror = function () { resolve(null); };
       img.src = asset.url;
     });

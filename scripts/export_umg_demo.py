@@ -36,6 +36,8 @@ def export_demo(widget: Path, output: Path) -> None:
     html = html.replace('<script src="umg/engine.js"></script>', '<script>' + engine + '</script>')
     material = (ROOT / "ui" / "umg" / "material.js").read_text(encoding="utf-8")
     html = html.replace('<script src="umg/material.js"></script>', '<script>' + material + '</script>')
+    bindings = (ROOT / "ui" / "umg" / "bindings.js").read_text(encoding="utf-8")
+    html = html.replace('<script src="umg/bindings.js"></script>', '<script>' + bindings + '</script>')
     data = json.dumps(result, ensure_ascii=True).replace("<", "\\u003c")
     html = html.replace('</head>', '<script>window.__offlineDemo=' + data + ';</script></head>')
     html = html.replace('id="btn-details"', 'id="btn-details" hidden')
