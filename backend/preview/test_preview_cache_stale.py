@@ -383,6 +383,25 @@ def test_load_material_preview_falls_back_to_embedded_when_capture_fails(monkeyp
     assert out["from_embedded_thumbnail"] is True
 
 
+def test_a_record_cached_while_uefn_had_another_island_open_is_corrected_from_the_file(monkeypatch):
+    """UEFN on another island answers class "None" and its own mount: the file itself wins."""
+    import os
+
+    import pytest
+
+    widget = os.environ.get("DUCKY_TEST_WIDGET")
+    if not widget:
+        pytest.skip("set DUCKY_TEST_WIDGET to a widget .uasset")
+    from . import service as preview_service
+    from .uasset import load_package
+
+    monkeypatch.setattr(preview_service.pf, "resolve_project_file_path", lambda rel: widget)
+    stale = {"asset_class": "None", "asset_path": "/another-island/ShopUI/UW_Shop", "mode": "badge"}
+    out = preview_service._annotate_preview(stale, "Content/UI/W.uasset")
+    assert out["asset_class"] == "WidgetBlueprint" and out["preview_kind"] == "widget"
+    assert out["asset_path"] == load_package(widget).package_name
+
+
 def _texture_asset(tmp_path, source_name, md5):
     import struct
 

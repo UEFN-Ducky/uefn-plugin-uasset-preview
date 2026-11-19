@@ -29,6 +29,7 @@ _TEXTURE_CLASSES = frozenset(
 
 
 _WIDGET_CLASSES = frozenset({"widgetblueprint", "editorutilitywidgetblueprint"})
+_SOUND_CLASSES = frozenset({"soundwave", "soundcue"})
 
 
 def normalize_asset_class(asset_class: str) -> str:
@@ -36,7 +37,7 @@ def normalize_asset_class(asset_class: str) -> str:
 
 
 def guess_preview_kind(relative_path: str, asset_class: str = "") -> str:
-    """Return static_mesh | material | texture | niagara | widget | other."""
+    """Return static_mesh | material | texture | niagara | widget | sound | other."""
     cls = normalize_asset_class(asset_class).lower()
     # Redirectors are stubs for moved assets — ignore class and use path heuristics.
     if cls == "objectredirector":
@@ -51,6 +52,8 @@ def guess_preview_kind(relative_path: str, asset_class: str = "") -> str:
         return "niagara"
     if cls in _WIDGET_CLASSES:
         return "widget"
+    if cls in _SOUND_CLASSES:
+        return "sound"
 
     path =(relative_path or "").strip().replace("\\", "/").lower()
     stem = Path(path).stem.lower()

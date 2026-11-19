@@ -308,6 +308,32 @@ def cmd_preview_asset(asset_path: str, max_size: int = 256) -> dict:
     return result
 
 
+@register("export_sound_wav")
+def cmd_export_sound_wav(asset_path: str) -> dict:
+    """Export a SoundWave to a WAV under DuckyPreviews (for the widget preview's audio)."""
+    from listener.asset_resolve import load_asset_resolved
+
+    sound, resolved = load_asset_resolved(asset_path)
+    if sound is None:
+        raise ValueError(f"Asset not found: {asset_path}")
+    exporter_cls = getattr(unreal, "SoundExporterWAV", None)
+    if exporter_cls is None or not isinstance(sound, unreal.SoundWave):
+        raise ValueError("Only SoundWave assets can be exported to WAV")
+    stem = (resolved or asset_path).rsplit("/", 1)[-1].split(".", 1)[0] or "sound"
+    out_path = os.path.join(_preview_dir(), f"{stem}.wav")
+    task = unreal.AssetExportTask()
+    task.object = sound
+    task.filename = out_path
+    task.selected = False
+    task.replace_identical = True
+    task.prompt = False
+    task.automated = True
+    task.exporter = exporter_cls()
+    if not unreal.Exporter.run_asset_export_task(task) or not os.path.isfile(out_path):
+        raise RuntimeError(f"WAV export failed for {asset_path}")
+    return {"exported_file": out_path, "asset_path": resolved or asset_path}
+
+
 # Epic's EditorAppToolset.CaptureAssetImage renders the Content Browser thumbnail
 # in its own preview scene — the level is never touched. It completes a few frames
 # later, and waiting here would block the tick that finishes it, so callers start

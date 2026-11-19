@@ -9,3 +9,4 @@ cache/
 
 # Agent / local scratch dirs (never commit)
 .tmp-*
+.devtmp/
